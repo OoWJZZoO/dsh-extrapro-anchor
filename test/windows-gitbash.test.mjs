@@ -12,6 +12,7 @@ import {
   gitBashCandidates,
   hideBashTool,
   renderGitBashResult,
+  resolveGitBashWorkdir,
   runGitBashCommand,
   withoutToolNamed,
 } from '../lib/windows-gitbash.js'
@@ -76,6 +77,14 @@ test('renderGitBashResult renders stdout, stderr, and exit markers', () => {
     renderGitBashResult({ stdout: '', stderr: '', exitCode: null, signal: 'SIGTERM', timedOut: true, timeoutMs: 1234 }),
     /timed out after 1234ms/,
   )
+})
+
+test('resolveGitBashWorkdir defaults to the session cwd and resolves relative paths against it', () => {
+  const exec = { agent: { session: { header: { cwd: '/work/proj' } } } }
+  assert.equal(resolveGitBashWorkdir(undefined, exec), '/work/proj')
+  assert.equal(resolveGitBashWorkdir('sub/dir', exec), join('/work/proj', 'sub/dir'))
+  assert.equal(resolveGitBashWorkdir('/abs/dir', exec), '/abs/dir')
+  assert.equal(resolveGitBashWorkdir(undefined, undefined), process.cwd())
 })
 
 test('createGitBashToolDefinition validates args and runs a real bash when available', async () => {
