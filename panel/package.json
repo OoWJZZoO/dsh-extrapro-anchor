@@ -1,0 +1,23 @@
+{
+  "name": "@deepseek-ai/dsh-anchor-seed-panel",
+  "description": "anchor-seed floating panel companion: collapsible, draggable Web overlay for the injection switch, chain health, and injected-text editing",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}

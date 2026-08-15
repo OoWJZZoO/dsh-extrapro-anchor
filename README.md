@@ -21,6 +21,12 @@ and its evidence in
   anything; the first real request already carries the full tool catalog and a
   history that reads like a minimal-mode session that just finished an
   onboarding read.
+- A **floating Web panel** (collapsed and OFF by default, right side of the
+  page) toggles injection, shows the live thinking-chain health (any `let me`
+  in recent reasoning turns the readout amber/red), and edits the injected
+  texts with a reset-to-built-in-defaults button. Edits are cached in the
+  browser and written to disk when the panel is folded or when the next
+  injection happens.
 
 This is a community project. It is not an official DeepSeek preset and is not
 affiliated with or endorsed by DeepSeek.
@@ -175,18 +181,30 @@ different preset.
 
 The example composition keeps the Minimal system prompt (complete) and mounts
 the full Standard tool set — exactly the anchored-standard surface, minus the
-bootstrap, plus the seed.
+bootstrap, plus the seed. The self-contained preset ships **no floating
+panel**, so its `anchor-seed` row sets `enabled: true`; injection stays on by
+default in this install path.
 
 ### As a bundle plugin on your own preset
 
-Add the package and insert one row into your preset's `agent.cordis.yml`:
+Add the package through `dsh plugin add` (its `cordis.patch.yml` inserts BOTH
+rows: the host `anchor-seed` row and the `anchor-seed-panel` companion row), or
+insert the two rows manually:
 
 ```yaml
 - id: anchor-seed
   name: '@deepseek-ai/dsh-anchor-seed'
   config:
     elevationPrompt: ''   # '' → auto-capture non-persona prompt sections
+- id: anchor-seed-panel
+  name: '@deepseek-ai/dsh-anchor-seed/panel'
+  config: {}
 ```
+
+Restart `dsh web` (or hot-add the panel row through the profile patch watcher),
+then refresh the existing URL: the collapsed panel appears on the right side of
+the page. In bundle installs injection defaults to **OFF** — flip the panel
+switch once to enable it.
 
 Requirements for the anchoring to work as designed:
 
@@ -201,10 +219,45 @@ Requirements for the anchoring to work as designed:
   needs no dedupe. `injectProjectInstructions` / `maxInstructionsBytes` config
   keys are accepted for backward compatibility but inert.
 
+## Floating panel (Web)
+
+The companion row `@deepseek-ai/dsh-anchor-seed/panel` registers a floating,
+draggable, collapsible panel in the shell overlay. Out of the box it sits at
+the right side, collapsed, with injection **off**:
+
+- **Collapsed** shows exactly two things: the injection switch and the
+  thinking-chain health readout.
+- **Expanded** edits the four injected texts (elevation notice, virtual user
+  template, virtual reasoning template, virtual command template) and offers a
+  one-click **reset to the plugin's built-in defaults**. `{path}` stays the
+  project-root-relative guide path placeholder; templates without it are
+  flagged red and not saved.
+- The injection switch saves immediately. Text edits are cached in the browser
+  and **written to disk when the panel is folded or when the next injection
+  happens** (the panel observes a new session id and flushes first), so the
+  next seed always uses the last persisted values.
+- Panel position is remembered per browser (`localStorage`); the default is
+  the right edge.
+
+The health number follows the repository's reference evidence: the lexical
+classifier published in
+[`modeltest/evaluator/trigger_probe/src/classifier.mjs`](modeltest/evaluator/trigger_probe/src/classifier.mjs)
+(`We need` / `we` style scores up, `Let me` scores down) and the trajectory
+tables in `dsh-anchored-standard` / `modeltest/docs/v4.1` (anchored runs have
+`let me = 0/1`, standard runs `let me = 208`). Any `let me` in the latest
+reasoning blocks therefore turns the readout amber/red so the user is alerted
+immediately; a stable `we`-style chain reads green with a 0–100 score.
+
+Settings persist to `$DSH_HOME/storages/anchor-seed/settings.json` (override
+with `DSH_ANCHOR_SEED_SETTINGS_PATH`). The host plugin re-reads the file on
+mtime change before every fresh seed — disk is the source of truth.
+
 ## Configuration (composition row `config`)
 
 | Key | Default | Description |
 | --- | --- | --- |
+| `enabled` | `false` (panel posture; the self-contained preset sets `true`) | Injection switch fallback when no panel settings file exists. The panel's durable setting overrides this at seed time. |
+| `settingsPath` | `$DSH_HOME/storages/anchor-seed/settings.json` | Override path for the panel settings file (tests / unusual deployments). |
 | `elevationPrompt` | `''` | The preset's real prompt placed after the elevation notice in the guide file. |
 | `elevationSource` | `auto` | `auto`: capture non-persona prompt sections of the assembly (fallback to `elevationPrompt`); `config`: use `elevationPrompt` only; `none`: notice only. |
 | `elevationNotice` | `When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:` | The fixed framing sentence. |
@@ -219,6 +272,12 @@ Requirements for the anchoring to work as designed:
 | `guard.enabled` | `true` | Environment self-check switch; `false` force-loads the plugin. |
 
 ## Verify
+
+Panel (bundle installs): after the page refresh, the collapsed pill shows on
+the right; `curl http://127.0.0.1:<web-port>/plugins/@deepseek-ai/dsh-anchor-seed/panel/client.js`
+serves the client bundle, and
+`$DSH_HOME/storages/anchor-seed/settings.json` appears after the first switch
+toggle or fold with edits.
 
 Export the session JSONL and inspect the events of the first turn:
 
@@ -239,6 +298,12 @@ npm test
 
 ## Important behavior
 
+- **Bundle installs default to OFF.** Fresh sessions are not seeded and keep
+  their ordinary system prompt until the panel switch (or a persisted
+  `settings.json` / row config) enables injection. Sessions that already carry
+  a durable anchor keep the minimal replacement when the switch is turned off
+  mid-flight; a partial seed is completed, never left half-written. The
+  self-contained preset sets `enabled: true` because it ships no panel.
 - The seed is appended inside the first `system-prompt/assemble` waterfall,
   before `buildRequest` derives the request messages — the first real request
   always includes the virtual turn.
@@ -263,10 +328,12 @@ npm test
   missing model route, or a session that rejects an event logs one warning
   and leaves the session running WITHOUT the anchor. A plugin hook never
   throws into the harness.
-- The plugin performs no network requests and adds no telemetry.
-- The plugin has the same trust level as shell access — it writes one file
-  into the project (`.dsh/agent-dev-guide.md`). Add `.dsh/` to your project's
-  `.gitignore`.
+- The plugin performs no external network requests and adds no telemetry (the
+  panel talks only to the local host's own Typert Remote bridge).
+- The plugin has the same trust level as shell access — it writes the shared
+  guide file `.dsh/agent-dev-guide.md` into each seeded project and the panel
+  settings file under `$DSH_HOME/storages/anchor-seed/`. Add `.dsh/` to your
+  project's `.gitignore`.
 
 ## Known limitations
 
@@ -291,8 +358,16 @@ npm test
 
 `lib/runtime.js` is pure and harness-free (fully unit-tested); `lib/index.js`
 is the Cordis host plugin; `lib/guards.js` is the fail-safe environment
-self-check (dsh-read-image pattern). `preset/lib/` is a build snapshot — run
-`scripts/build-preset.sh` after changing `lib/`.
+self-check (dsh-read-image pattern); `lib/settings.js` is the disk-backed
+panel settings store; `lib/health.js` is the modeltest-derived chain-health
+classifier; `lib/config-remote.js` builds the `anchorSeedConfig` Typert Remote
+bridge. `panel/` is the companion client row (empty host half + the
+`__ModuleLoader__` browser bundle in `panel/client.js`). `preset/lib/` is a
+build snapshot — run `scripts/build-preset.sh` after changing `lib/`.
+
+The panel bundle duplicates the defaults (`lib/settings.js`) and the health
+classifier (`lib/health.js`) because a served client bundle cannot import the
+host half — keep the three sides in sync.
 
 Sampling helper: `scripts/find-best-sampling-round.mjs` batch-scans
 `$DSH_HOME/sessions/<cwd-slug>/` and ranks every session against the modeltest

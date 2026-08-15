@@ -16,15 +16,29 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   content, bash-stdout result rendering, durable anchor-state inspection).
   No Cordis imports; fully unit-tested. Keep it that way.
 - `lib/index.js` — the Cordis host plugin: config parsing, fail-safe guard
-  wiring, the `system-prompt/assemble` hook, file writing, event injection.
+  wiring, the `system-prompt/assemble` hook, settings-file gating, file
+  writing, event injection.
+- `lib/settings.js` — disk-backed panel settings store (defaults, validation,
+  atomic writes). No Cordis imports.
+- `lib/health.js` — thinking-chain health classifier derived from the
+  reference repos (modeltest trigger probe + dsh-anchored-standard tables).
+- `lib/config-remote.js` — `anchorSeedConfig` Typert Remote bridge builder;
+  receives the protocol namespace as a parameter so the module itself has no
+  external imports (preset copies must stay self-contained).
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
   check must leave the plugin inert, never take the harness boot down.
+- `panel/` — companion client row: empty host half (`index.js`), nested
+  `package.json` carrying the `dsh.client` manifest, and the hand-built
+  `__ModuleLoader__` browser bundle `client.js` (floating overlay, switch,
+  health, text editor).
 - `preset/` — self-contained example preset (minimal persona + Standard tools
-  + the anchor-seed row). `preset/lib/` is a BUILD SNAPSHOT: after changing
-  `lib/`, run `./scripts/build-preset.sh`.
-- `test/` — `node --test`; run `npm test` (70 tests incl. the reference
-  dsh-anchored-standard tree under this checkout). `lib/runtime.js` must stay
-  testable with zero harness dependencies.
+  + the anchor-seed row, `enabled: true` because presets ship no panel).
+  `preset/lib/` is a BUILD SNAPSHOT: after changing `lib/`, run
+  `./scripts/build-preset.sh`.
+- `test/` — `node --test`; run `npm test` (86 tests incl. the reference
+  dsh-anchored-standard tree under this checkout). `lib/runtime.js`,
+  `lib/settings.js`, and `lib/health.js` must stay testable with zero harness
+  dependencies.
 
 ## Invariants (do not break)
 
@@ -113,10 +127,52 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   carries `source.kind: 'user'` so the trajectory renders it as a real user
   message.
 
+## Working on the floating panel
+
+- **One row id, five matching spellings.** The panel is a companion row named
+  `@deepseek-ai/dsh-anchor-seed/panel`. These must stay byte-identical: the
+  row name in `cordis.patch.yml`, the root package `exports["./panel"]`,
+  `exports["./panel/package.json"]` / `"./panel/*"`, the nested
+  `panel/package.json` `exports["./client"]`, and the
+  `window.__ModuleLoader__.load({ id })` string in `panel/client.js`.
+- **Disk is the truth.** The switch saves immediately through
+  `anchorSeedConfig.set`; text drafts are cached in the browser and flushed on
+  fold or when the panel observes a NEW session id ("cache lands at the next
+  injection"). The host re-reads `settings.json` on mtime change before every
+  fresh seed. Invalid templates (missing `{path}`) are refused by BOTH the
+  client (`validDraft`) and the host (`normalizeSettingsUpdate`).
+- **Defaults are OFF for panel-capable installs.** `DEFAULT_SETTINGS.enabled`
+  is `false`; the self-contained preset (no panel) sets `enabled: true` in
+  `preset/agent.cordis.yml`. Do not "helpfully" flip either default.
+- **The Remote bridge must stay optional.** `lib/index.js` resolves
+  typert-protocol with `createRequire` inside try/catch — never a top-level
+  import — so the preset copy without node_modules still boots. A missing
+  bridge only disables panel saving; injection itself keeps working.
+- **The Remote parameter name is wire-load-bearing.** The gateway derives the
+  endpoint descriptor from the host method's REAL parameter names
+  (`set(settings)`), so the client contribution's json parameter must declare
+  `{ name: "settings", wire: "settings" }`. A mismatch fails every write with
+  `arguments-invalid` — rename both sides together.
+- **Do not put `dsh.client` on the root package.** The host row is already
+  loaded in running profiles, so its package metadata is cached and a new
+  client manifest would not be re-scanned until restart; the companion row is
+  a NEW entry id and can be hot-added. The root package also must stay
+  resolvable from `$DSH_HOME/.agent-presets/anchor-seed/lib` for the preset
+  path.
+- **The panel bundle duplicates two host modules** (defaults from
+  `lib/settings.js`, health classifier from `lib/health.js`) because a served
+  client bundle cannot import the host half. Update all three sides together,
+  and keep the panel's client-side guard pattern: any missing client service
+  logs and installs nothing — a failed client plugin takes the whole web boot
+  down.
+- **Health reads the model, not the seed.** The panel excludes the virtual
+  prelude (`turn: 1, step: 0`) and includes the live partial; any `let me` in
+  the recent window must show the amber/red warning state.
+
 ## Verification workflow
 
 ```sh
-npm run check     # syntax check lib/* + full test run
+npm run check     # syntax check lib/* + panel/* + full test run
 ./scripts/build-preset.sh   # refresh preset/lib snapshot after lib/ changes
 ```
 

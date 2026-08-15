@@ -1,12 +1,15 @@
 {
   "name": "@deepseek-ai/dsh-anchor-seed",
-  "description": "Seed every top-level session with one pre-sampled minimal-style virtual read turn whose tool result elevates the session to the preset's real prompt, then injects AGENTS.md/CLAUDE.md — deterministic trajectory anchoring without any real tool call.",
-  "version": "0.1.8",
+  "description": "Seed every top-level session with one pre-sampled minimal-style virtual read turn whose tool result elevates the session to the preset's real prompt — deterministic trajectory anchoring without any real tool call, plus a collapsible floating Web panel (injection switch, chain-health readout, injected-text editor).",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./panel": "./panel/index.js",
+    "./panel/package.json": "./panel/package.json",
+    "./panel/*": "./panel/*"
   },
   "dsh": {
     "bundle": {
@@ -28,7 +31,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check lib/index.js && node --check lib/runtime.js && node --check lib/guards.js && node --test"
+    "check": "node --check lib/index.js && node --check lib/runtime.js && node --check lib/guards.js && node --check lib/settings.js && node --check lib/health.js && node --check lib/config-remote.js && node --check panel/index.js && node --check panel/client.js && node --test"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"

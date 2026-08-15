@@ -15,6 +15,9 @@
 - `anchor-seed` 让锚定**确定性**发生:在首个请求之前把一轮虚拟回合追加进 session 日志。
   模型什么都不用做,首个真实请求就同时拥有完整工具目录和一段"刚完成 onboarding 读取的
   minimal 会话"历史。
+- 附带一个**前台悬浮面板**(默认折叠、默认关闭、位于网页右侧):一键开关锚定注入、实时
+  显示思考链健康度(最近的思考里出现 `let me` 就会变黄/变红提醒用户)、展开后可编辑
+  注入文本并提供"恢复默认"。修改先在浏览器缓存,面板收起或下一次注入发生时落盘生效。
 
 这是社区项目,并非 DeepSeek 官方 preset,也不代表 DeepSeek 的认可或背书。
 
@@ -139,17 +142,26 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
 完整重启 DeepSeek Harness,新建空白会话,选择 **Anchor Seed (experimental)**。
 不要在已有内容的会话中途切换 preset。示例组合保留 Minimal system prompt(complete)
 并挂载完整 Standard 工具集——即 anchored-standard 的表面,去掉 bootstrap,加上种子。
+自包含 preset 不带悬浮面板,因此其 `anchor-seed` 行写死了 `enabled: true`;这种安装方式
+下注入默认开启。
 
 ### 方式二:作为 bundle 插件叠加到自有 preset
 
-在任意 preset 的 `agent.cordis.yml` 里加一行:
+用 `dsh plugin add` 安装(其 `cordis.patch.yml` 会自动插入宿主 `anchor-seed` 行和
+`anchor-seed-panel` 面板伴随行),或手工插入两行:
 
 ```yaml
 - id: anchor-seed
   name: '@deepseek-ai/dsh-anchor-seed'
   config:
     elevationPrompt: ''   # '' → 自动捕获非 persona 提示词段
+- id: anchor-seed-panel
+  name: '@deepseek-ai/dsh-anchor-seed/panel'
+  config: {}
 ```
+
+重启 `dsh web`(或用 profile patch 热加载器热加面板行)后刷新现有页面,右侧会出现
+折叠的悬浮面板。bundle 安装方式下注入**默认关闭**——把面板上的开关打开一次即可启用。
 
 锚定按设计生效的前提:
 
@@ -161,10 +173,36 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
   anchor-seed 不自行注入指令,也无需去重。`injectProjectInstructions` /
   `maxInstructionsBytes` 配置键为兼容保留,实际无作用。
 
+## 悬浮面板(Web)
+
+伴随行 `@deepseek-ai/dsh-anchor-seed/panel` 在页面浮层里注册一个可拖动、可折叠的面板,
+默认位于右侧、处于折叠状态,注入开关默认**关闭**:
+
+- **折叠时**只显示两样:注入开关和思考链健康度;
+- **展开后**可编辑四项注入文本(引导说明、虚拟提问、虚拟思考、注入命令),并提供一键
+  **恢复插件内置默认值**。`{path}` 仍是项目根相对路径占位符;缺少 `{path}` 的模板会
+  标红且不会被保存;
+- 注入开关即时生效;文本修改先缓存在浏览器,面板**收起或下一次注入发生时落盘生效**
+  (面板观察到新会话出现会先 flush),下一次 seed 永远使用最后持久化的值;
+- 面板位置按浏览器记忆(`localStorage`),默认贴网页右侧。
+
+健康度的量化方式来自仓库内参考证据:逐字采用
+[`modeltest/evaluator/trigger_probe/src/classifier.mjs`](modeltest/evaluator/trigger_probe/src/classifier.mjs)
+的词法分类器(`We need`/`we` 风格加分,`Let me` 减分),并对照
+`dsh-anchored-standard` 与 `modeltest/docs/v4.1` 的轨迹表(锚定轮 `let me = 0/1`,
+standard 轮 `let me = 208`)。因此最近的思考块里一旦出现 `let me`,读数立即变黄/变红;
+稳定 `we` 风格显示绿色和 0–100 分。
+
+设置持久化在 `$DSH_HOME/storages/anchor-seed/settings.json`(可用环境变量
+`DSH_ANCHOR_SEED_SETTINGS_PATH` 覆盖)。宿主插件在每次 fresh seed 前按文件 mtime
+重读——磁盘即事实。
+
 ## 配置(组合行 `config`)
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
+| `enabled` | `false`(面板姿态;自包含 preset 写 `true`) | 无面板设置文件时的注入开关兜底。面板落盘值在 seed 时覆盖此值。 |
+| `settingsPath` | `$DSH_HOME/storages/anchor-seed/settings.json` | 面板设置文件路径覆盖(测试/特殊部署用)。 |
 | `elevationPrompt` | `''` | 放在 elevation 句子之后的 preset 真实提示词。 |
 | `elevationSource` | `auto` | `auto`:捕获组装中的非 persona 提示词段(空则回退 `elevationPrompt`);`config`:只用 `elevationPrompt`;`none`:只有句子。 |
 | `elevationNotice` | `When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:` | 固定框架句。 |
@@ -179,6 +217,11 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
 | `guard.enabled` | `true` | 环境自检开关;`false` 跳过自检强行加载。 |
 
 ## 验证加载
+
+面板(bundle 安装):刷新页面后右侧出现折叠胶囊;
+`curl http://127.0.0.1:<web 端口>/plugins/@deepseek-ai/dsh-anchor-seed/panel/client.js`
+能取到客户端 bundle;第一次拨动开关或收起带修改的面板后,
+`$DSH_HOME/storages/anchor-seed/settings.json` 落盘。
 
 导出 session JSONL,检查首轮事件:
 
@@ -197,6 +240,10 @@ npm test
 
 ## 重要行为
 
+- **bundle 安装默认关闭。** 未开启前,新会话不注入、保持普通 system 提示词;面板开关
+  (或已落盘的 `settings.json` / 组合行配置)打开后才注入。已带 durable 锚定的会话在
+  中途关闭开关后仍保持 minimal 替换;半成品 seed 会被补全而不是丢下半个转录。自包含
+  preset 因没有面板,写死 `enabled: true`。
 - 种子在首个 `system-prompt/assemble` waterfall 内追加,早于 `buildRequest` 派生
   请求消息——首个真实请求必然包含虚拟轮。
 - 仅顶层新鲜会话:子 agent(`delegationDepth > 0` 或 `origin: 'subagent'`)永不注入;
@@ -212,9 +259,10 @@ npm test
   一条由真实消息派生的修正 fallback。
 - 所有失败路径都降级:自检失败、guide 写入失败、缺少模型路由、会话拒绝事件——只记
   一次告警,会话不带锚定继续运行;插件钩子绝不向 harness 抛错。
-- 插件无网络请求、无遥测。
-- 与 shell 同级信任:插件会向项目写入一个文件(`.dsh/agent-dev-guide.md`),请把
-  `.dsh/` 加入项目 .gitignore。
+- 插件无外部网络请求、无遥测(面板只与本机宿主的 Typert Remote 桥通信)。
+- 与 shell 同级信任:插件会向项目写入共享 guide 文件(`.dsh/agent-dev-guide.md`),
+  并向 `$DSH_HOME/storages/anchor-seed/` 写入面板设置;请把 `.dsh/` 加入项目
+  .gitignore。
 
 ## 已知限制
 
@@ -232,8 +280,14 @@ npm test
 ## 开发
 
 `lib/runtime.js` 是纯逻辑(无 harness 依赖,完全可单测);`lib/index.js` 是 Cordis
-宿主插件;`lib/guards.js` 是 fail-safe 环境自检(dsh-read-image 模式)。
-`preset/lib/` 是构建快照——改动 `lib/` 后运行 `scripts/build-preset.sh`。
+宿主插件;`lib/guards.js` 是 fail-safe 环境自检(dsh-read-image 模式);
+`lib/settings.js` 是面板设置的磁盘存储;`lib/health.js` 是参考仓库派生的思考链健康度
+分类器;`lib/config-remote.js` 构造 `anchorSeedConfig` Typert Remote 桥。`panel/`
+是面板伴随行(空宿主半边 + `panel/client.js` 浏览器 bundle)。`preset/lib/` 是构建
+快照——改动 `lib/` 后运行 `scripts/build-preset.sh`。
+
+浏览器 bundle 无法 import 宿主半边,因此 `panel/client.js` 内重复了默认文本(对应
+`lib/settings.js`)与健康度分类器(对应 `lib/health.js`)——三处必须同步修改。
 
 采样辅助:`scripts/find-best-sampling-round.mjs` 批量扫描
 `$DSH_HOME/sessions/<cwd-slug>/`,按 modeltest minimal 指纹(逐字复用

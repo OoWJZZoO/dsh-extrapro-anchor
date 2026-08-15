@@ -6,5 +6,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p preset/lib
-cp lib/index.js lib/runtime.js lib/guards.js preset/lib/
+cp lib/*.js preset/lib/
 echo "preset/lib updated: $(ls preset/lib)"

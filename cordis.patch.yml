@@ -11,3 +11,13 @@
         # the guide file. Leave empty (default) to auto-capture the non-persona
         # prompt sections assembled for the session.
         elevationPrompt: ''
+
+    # Floating panel companion row (browser half + empty host half). It rides a
+    # subpath of the same package so the client-modules scanner can hot-add it
+    # as a NEW entry id without invalidating the cached metadata of the host
+    # row above. In Web it registers the collapsible/draggable overlay: the
+    # injection switch, the thinking-chain health readout, and the injected-text
+    # editor. Self-contained preset installs do not mount this row (no panel).
+    - id: anchor-seed-panel
+      name: '@deepseek-ai/dsh-anchor-seed/panel'
+      config: {}

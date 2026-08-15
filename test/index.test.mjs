@@ -8,6 +8,14 @@ import { apply, name, parseConfig } from '../lib/index.js'
 import { checkHostEnvironment } from '../lib/guards.js'
 import { appendVirtualTurn, buildVirtualTurn, guideRelativePath } from '../lib/runtime.js'
 
+/** Config shorthand: seeding tests turn injection ON (the new default is OFF). */
+const SEED_ON = { enabled: true }
+
+// Hermetic settings file for the whole test process: the production default
+// ($DSH_HOME/storages/anchor-seed/settings.json) must never leak into tests.
+const TEST_SETTINGS_ROOT = mkdtempSync(join(tmpdir(), 'anchor-seed-test-settings-'))
+process.env.DSH_ANCHOR_SEED_SETTINGS_PATH = join(TEST_SETTINGS_ROOT, 'settings.json')
+
 function makeCtx({ cwd, sessionTitle } = {}) {
   const state = { listeners: new Map() }
   const warns = []
@@ -88,7 +96,7 @@ test('exports a diagnostic plugin name', () => {
 
 test('apply registers a system-prompt/assemble and session/event listener', () => {
   const { ctx, state } = makeCtx({ cwd: '/' })
-  apply(ctx, {})
+  apply(ctx, SEED_ON)
   assert.equal(typeof state.listeners.get('system-prompt/assemble')?.at(-1)?.callback, 'function')
   assert.equal(typeof state.listeners.get('session/event')?.at(-1)?.callback, 'function')
 })
@@ -97,7 +105,7 @@ test('a fresh top-level session is seeded: events + real shared guide file', asy
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state, warns } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     const agent = makeAgent({ session })
     await runSeed({ ctx, state, agent })
@@ -140,11 +148,67 @@ test('a fresh top-level session is seeded: events + real shared guide file', asy
   }
 })
 
+test('injection is OFF by default: a fresh session is left untouched', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {}) // no enabled flag, no settings file → panel default OFF
+    const session = makeSession({ cwd })
+    const result = await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    assert.equal(session.events.length, 0)
+    assert.equal(result.sections.length, 2) // ordinary assembly passes through
+    assert.equal(result.sections[0].name, 'deployment:persona')
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('the persisted panel settings take effect on the next injection', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const settingsPath = join(cwd, 'panel-settings.json')
+    writeFileSync(settingsPath, JSON.stringify({
+      version: 1,
+      enabled: false,
+      elevationNotice: '自定义引导说明',
+      virtualUserTemplate: '请读取 {path} 后照做。',
+      virtualReasoningTemplate: 'We need read {path}.',
+      virtualCommandTemplate: 'cat {path}',
+    }), 'utf8')
+    const { ctx, state } = makeCtx({ cwd })
+    // Row config would enable injection, but the disk says OFF — disk wins.
+    apply(ctx, { enabled: true, settingsPath })
+    const session = makeSession({ cwd })
+    const first = await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    assert.equal(session.events.length, 0)
+    assert.equal(first.sections.length, 2)
+
+    // Panel folds / the next injection flips the switch and changes the texts.
+    writeFileSync(settingsPath, JSON.stringify({
+      version: 1,
+      enabled: true,
+      elevationNotice: '自定义引导说明',
+      virtualUserTemplate: '请读取 {path} 后照做。',
+      virtualReasoningTemplate: 'We need read {path}.',
+      virtualCommandTemplate: 'cat {path}',
+    }), 'utf8')
+    await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    assert.equal(session.events.length, 4)
+    assert.equal(session.events[0].data.content[0].text, '请读取 .dsh/agent-dev-guide.md 后照做。')
+    assert.equal(session.events[1].data.message.content[0].text, 'We need read .dsh/agent-dev-guide.md.')
+    assert.deepEqual(JSON.parse(session.events[2].data.arguments), { command: 'cat .dsh/agent-dev-guide.md' })
+    const resultText = session.events[3].data.message.content[0].content[0].text
+    assert.ok(resultText.includes(`${cwd}\n自定义引导说明\n`))
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
 test('elevationSource config forces the explicit prompt', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, { elevationSource: 'config', elevationPrompt: 'Only the config prompt.' })
+    apply(ctx, { enabled: true, elevationSource: 'config', elevationPrompt: 'Only the config prompt.' })
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const resultText = session.events.find((e) => e.type === 'tool/result').data.message.content[0].content[0].text
@@ -159,7 +223,7 @@ test('elevationSource none emits the notice only', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, { elevationSource: 'none' })
+    apply(ctx, { enabled: true, elevationSource: 'none' })
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const resultText = session.events.find((e) => e.type === 'tool/result').data.message.content[0].content[0].text
@@ -175,7 +239,7 @@ test('AGENTS.md/CLAUDE.md are NOT injected by the plugin (harness owns them)', a
     writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
     writeFileSync(join(cwd, 'CLAUDE.md'), 'claude rules')
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const types = session.events.map((e) => e.type)
@@ -189,7 +253,7 @@ test('virtual turn events carry turn 1 step 0 (no collision with the real first 
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const assistant = session.events.find((e) => e.type === 'assistant/message')
@@ -211,7 +275,7 @@ test('a session is seeded exactly once across repeated assemblies', async () => 
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     const agent = makeAgent({ session })
     await runSeed({ ctx, state, agent })
@@ -228,7 +292,7 @@ test('subagents (depth or origin) are never seeded', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const byDepth = makeSession({ cwd, depth: 1 })
     await runSeed({ ctx, state, agent: makeAgent({ session: byDepth }) })
     assert.equal(byDepth.events.length, 0)
@@ -244,7 +308,7 @@ test('sessions that already produced a real user message are not seeded', async 
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({
       cwd,
       events: [{
@@ -269,7 +333,7 @@ test('a resumed anchor session keeps the minimal system replacement (durable det
     seedTurn(session)
     const countBefore = session.events.length
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {}) // fresh plugin instance, empty WeakSet — simulates resume/reload
+    apply(ctx, SEED_ON) // fresh plugin instance, empty WeakSet — simulates resume/reload
     const result = await runSeed({ ctx, state, agent: makeAgent({ session }) })
     assert.equal(session.events.length, countBefore) // no re-seed
     assert.equal(result.sections.length, 2)
@@ -294,7 +358,7 @@ test('an interrupted partial seed is completed on the next assembly', async () =
     const session = makeSession({ cwd })
     session.append(events[0].type, events[0].data, events[0].opts)
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     assert.equal(session.events.length, 4)
     assert.deepEqual(session.events.map((e) => e.type), ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
@@ -307,7 +371,7 @@ test('a missing provider/model route refuses to seed instead of writing an unres
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state, warns } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     const agent = { session, options: {} }
     const result = await runSeed({ ctx, state, agent })
@@ -322,7 +386,7 @@ test('a missing provider/model route refuses to seed instead of writing an unres
 
 test('a session without session.append degrades with a warning, no throw', async () => {
   const { ctx, state, warns } = makeCtx({ cwd: '/' })
-  apply(ctx, {})
+  apply(ctx, SEED_ON)
   const agent = { session: { id: 'x', header: { cwd: '/' }, events: [], append: undefined }, options: { provider: 'p', model: 'm' } }
   const result = await runSeed({ ctx, state, agent })
   assert.equal(result.sections.length, 2) // assembly passes through untouched
@@ -332,7 +396,7 @@ test('a session without session.append degrades with a warning, no throw', async
 
 test('a file write failure degrades with a warning, no throw', async () => {
   const { ctx, state, warns } = makeCtx({ cwd: '/' })
-  apply(ctx, {})
+  apply(ctx, SEED_ON)
   // Point cwd at a path whose parent is a FILE: creating .dsh must fail.
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   const blocker = join(cwd, 'block')
@@ -351,7 +415,7 @@ test('the guard failure path loads nothing (fail-safe)', async () => {
   const { ctx, state, errors } = makeCtx({ cwd: '/' })
   process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL = '1'
   try {
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     assert.equal(state.listeners.get('system-prompt/assemble'), undefined)
     assert.ok(errors.length >= 1)
     assert.match(errors[0], /self-check FAILED/)
@@ -397,6 +461,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
   const defaults = parseConfig(undefined)
   assert.equal(defaults.elevationSource, 'auto')
   assert.equal(defaults.virtualToolName, 'bash')
+  assert.equal(defaults.enabled, false) // panel posture: collapsed and OFF
   assert.match(defaults.virtualCommandTemplate, /\{path\}/)
   assert.deepEqual(defaults.dynamicSections, ['plan:policy'])
   assert.equal(defaults.guardEnabled, true)
@@ -405,25 +470,31 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
   const custom = parseConfig({
     elevationSource: 'config',
     elevationPrompt: 'X',
+    enabled: true,
+    settingsPath: '/tmp/anchor-seed-settings.json',
     virtualToolName: 'cat',
     virtualCommandTemplate: 'cat {path}',
     dynamicSections: ['plan:policy', 'plan:policy', 'future:mode'],
     guard: { enabled: false },
   })
   assert.equal(custom.elevationSource, 'config')
+  assert.equal(custom.enabled, true)
+  assert.equal(custom.settingsPath, '/tmp/anchor-seed-settings.json')
   assert.equal(custom.virtualToolName, 'cat')
   assert.equal(custom.virtualCommandTemplate, 'cat {path}')
   assert.deepEqual(custom.dynamicSections, ['plan:policy', 'future:mode'])
   assert.equal(custom.guardEnabled, false)
   assert.deepEqual(custom.warnings, [])
 
-  const invalid = parseConfig({ elevationSource: 'bogus', virtualUserTemplate: 'no placeholder', dynamicSections: 'not-an-array' })
+  const invalid = parseConfig({ elevationSource: 'bogus', virtualUserTemplate: 'no placeholder', dynamicSections: 'not-an-array', enabled: 'yes' })
   assert.equal(invalid.elevationSource, 'auto')
+  assert.equal(invalid.enabled, false)
   assert.match(invalid.virtualUserTemplate, /\{path\}/)
   assert.deepEqual(invalid.dynamicSections, ['plan:policy'])
   assert.ok(invalid.warnings.some((w) => w.includes('elevationSource')))
   assert.ok(invalid.warnings.some((w) => w.includes('virtualUserTemplate')))
   assert.ok(invalid.warnings.some((w) => w.includes('dynamicSections')))
+  assert.ok(invalid.warnings.some((w) => w.includes('enabled')))
 
   const inert = parseConfig({ injectProjectInstructions: false, maxInstructionsBytes: 1234 })
   assert.ok(inert.warnings.some((w) => w.includes('inert')))
@@ -433,7 +504,7 @@ test('virtual templates default to the pre-sampled minimal texts', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const user = session.events[0]
@@ -454,7 +525,7 @@ test('system sections are replaced with minimal persona + two-tool statement', a
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     const agent = makeAgent({ session })
     const assembly = makeAssembly()
@@ -484,7 +555,7 @@ test('whitelisted dynamic sections are appended after the minimal system section
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     const agent = makeAgent({ session })
     const assembly = makeAssembly()
@@ -497,7 +568,7 @@ test('whitelisted dynamic sections are appended after the minimal system section
     assert.match(result.sections[2].text, /You are in plan mode/)
     // A dynamic section whose text renders empty (plan mode inactive) is dropped
     const { ctx: ctx2, state: state2 } = makeCtx({ cwd })
-    apply(ctx2, {})
+    apply(ctx2, SEED_ON)
     const session2 = makeSession({ cwd })
     const assembly2 = makeAssembly()
     assembly2.sections.push({ name: 'plan:policy', order: 50, text: '' })
@@ -513,7 +584,7 @@ test('guide content keeps the elevation but does not duplicate the tool catalog'
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     const agent = makeAgent({ session })
     const assembly = makeAssembly()
@@ -555,7 +626,7 @@ test('session title recovery regenerates from the real first message when a prov
       config: { fallbackMaxWords: 8, fallbackMaxBytes: 80 },
     }
     const { ctx, state } = makeCtx({ cwd, sessionTitle })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const anchorSeq = session.events[0].seq
@@ -586,7 +657,7 @@ test('session title recovery appends a corrected fallback when no title provider
       config: { fallbackMaxWords: 8, fallbackMaxBytes: 80 },
     }
     const { ctx, state } = makeCtx({ cwd, sessionTitle })
-    apply(ctx, {})
+    apply(ctx, SEED_ON)
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const anchorSeq = session.events[0].seq

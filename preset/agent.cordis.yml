@@ -55,6 +55,10 @@
     # this composition (plan mode, tool guidance, …); set `elevationSource:
     # config` to force this text; `elevationSource: none` for the notice only.
     elevationPrompt: ''
+    # This self-contained preset ships NO floating panel, so injection stays ON
+    # by default here. Bundle installs (which mount the companion panel row)
+    # default to OFF until the user flips the panel switch.
+    enabled: true
 
 # ── shell ───────────────────────────────────────────────────────────────────
 
