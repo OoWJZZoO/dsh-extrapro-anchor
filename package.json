@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-extrapro-anchor",
   "description": "Seed every top-level session with one pre-sampled minimal-style virtual read turn whose tool result elevates the session to the preset's real prompt — deterministic trajectory anchoring without any real tool call, plus a collapsible floating Web panel (injection switch, chain-health readout, injected-text editor).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

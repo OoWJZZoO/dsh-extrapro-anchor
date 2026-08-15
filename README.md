@@ -43,7 +43,7 @@ Manual install: add the dependency and insert the two rows, then restart.
 
 ```json
 // ~/.dsh/profiles/<profile>/package.json → dependencies
-"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.2.0"
+"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.3.0"
 ```
 
 ```sh
