@@ -28,18 +28,18 @@ test('default settings are OFF with the four built-in injected texts', () => {
   }
 })
 
-test('settingsFilePath: DSH_ANCHOR_SEED_SETTINGS_PATH wins, DSH_HOME is the default root', () => {
-  const previous = process.env.DSH_ANCHOR_SEED_SETTINGS_PATH
+test('settingsFilePath: DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH wins, DSH_HOME is the default root', () => {
+  const previous = process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH
   const previousHome = process.env.DSH_HOME
   try {
-    process.env.DSH_ANCHOR_SEED_SETTINGS_PATH = '/tmp/custom/anchor.json'
+    process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH = '/tmp/custom/anchor.json'
     assert.equal(settingsFilePath(), '/tmp/custom/anchor.json')
-    delete process.env.DSH_ANCHOR_SEED_SETTINGS_PATH
+    delete process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH
     process.env.DSH_HOME = '/tmp/dsh-home'
-    assert.equal(settingsFilePath(), join('/tmp/dsh-home', 'storages', 'anchor-seed', 'settings.json'))
+    assert.equal(settingsFilePath(), join('/tmp/dsh-home', 'storages', 'extrapro-anchor', 'settings.json'))
   } finally {
-    if (previous === undefined) delete process.env.DSH_ANCHOR_SEED_SETTINGS_PATH
-    else process.env.DSH_ANCHOR_SEED_SETTINGS_PATH = previous
+    if (previous === undefined) delete process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH
+    else process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH = previous
     if (previousHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousHome
   }
@@ -94,7 +94,7 @@ test('normalizeSettingsUpdate: validates the panel-editable fields', () => {
 })
 
 test('createSettingsStore: update persists atomically and later reads see the file', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'anchor-seed-settings-'))
+  const dir = mkdtempSync(join(tmpdir(), 'extrapro-anchor-settings-'))
   const path = join(dir, 'settings.json')
   try {
     const store = createSettingsStore({ path, fallback: { enabled: true } })
@@ -117,7 +117,7 @@ test('createSettingsStore: update persists atomically and later reads see the fi
 })
 
 test('createSettingsStore: a corrupt file degrades to defaults with a warning', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'anchor-seed-settings-'))
+  const dir = mkdtempSync(join(tmpdir(), 'extrapro-anchor-settings-'))
   const path = join(dir, 'settings.json')
   try {
     writeFileSync(path, '{not json', 'utf8')
@@ -131,7 +131,7 @@ test('createSettingsStore: a corrupt file degrades to defaults with a warning', 
 })
 
 test('createSettingsStore: update rejects invalid drafts without touching the file', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'anchor-seed-settings-'))
+  const dir = mkdtempSync(join(tmpdir(), 'extrapro-anchor-settings-'))
   const path = join(dir, 'settings.json')
   try {
     const store = createSettingsStore({ path })

@@ -2,7 +2,7 @@
 /**
  * find-best-sampling-round — batch-scan DeepSeek Harness session logs and pick
  * the round that best matches the modeltest minimal trajectory fingerprint,
- * i.e. the best candidate to pre-sample the anchor-seed virtual turn from.
+ * i.e. the best candidate to pre-sample the extrapro-anchor virtual turn from.
  *
  * Metrics and the lexical classifier mirror `xiaobright/modeltest`:
  * - `evaluator/trigger_probe/src/classifier.mjs` (classifyReasoning, verbatim)

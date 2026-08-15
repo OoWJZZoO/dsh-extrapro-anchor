@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { createAnchorSeedConfigBridge, getAnchorSeedConfigService } from '../lib/config-remote.js'
+import { createExtraproAnchorConfigBridge, getExtraproAnchorConfigService } from '../lib/config-remote.js'
 import { createSettingsStore, defaultSettings } from '../lib/settings.js'
 
 /** Minimal Typert protocol double: Remote records markers, TypertRemoteService sets the binding name. */
@@ -27,16 +27,16 @@ function fakeProtocol() {
   }
 }
 
-test('the bridge exposes anchorSeedConfig.get/set and round-trips the settings store', async () => {
+test('the bridge exposes extraproAnchorConfig.get/set and round-trips the settings store', async () => {
   const protocol = fakeProtocol()
-  const dir = mkdtempSync(join(tmpdir(), 'anchor-seed-bridge-'))
+  const dir = mkdtempSync(join(tmpdir(), 'extrapro-anchor-bridge-'))
   try {
     const store = createSettingsStore({ path: join(dir, 'settings.json') })
-    const Bridge = createAnchorSeedConfigBridge(protocol, store)
+    const Bridge = createExtraproAnchorConfigBridge(protocol, store)
     const bridge = new Bridge({})
 
-    assert.equal(getAnchorSeedConfigService(), bridge)
-    assert.equal(bridge.name, 'anchorSeedConfig')
+    assert.equal(getExtraproAnchorConfigService(), bridge)
+    assert.equal(bridge.name, 'extraproAnchorConfig')
     assert.deepEqual(protocol.marked, ['get', 'set'])
 
     const initial = await bridge.get()

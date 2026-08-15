@@ -12,9 +12,9 @@ import { appendVirtualTurn, buildVirtualTurn, guideRelativePath } from '../lib/r
 const SEED_ON = { enabled: true }
 
 // Hermetic settings file for the whole test process: the production default
-// ($DSH_HOME/storages/anchor-seed/settings.json) must never leak into tests.
-const TEST_SETTINGS_ROOT = mkdtempSync(join(tmpdir(), 'anchor-seed-test-settings-'))
-process.env.DSH_ANCHOR_SEED_SETTINGS_PATH = join(TEST_SETTINGS_ROOT, 'settings.json')
+// ($DSH_HOME/storages/extrapro-anchor/settings.json) must never leak into tests.
+const TEST_SETTINGS_ROOT = mkdtempSync(join(tmpdir(), 'extrapro-anchor-test-settings-'))
+process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH = join(TEST_SETTINGS_ROOT, 'settings.json')
 
 function makeCtx({ cwd, sessionTitle } = {}) {
   const state = { listeners: new Map() }
@@ -91,7 +91,7 @@ function seedTurn(session) {
 }
 
 test('exports a diagnostic plugin name', () => {
-  assert.equal(name, 'anchor-seed')
+  assert.equal(name, 'dsh-extrapro-anchor')
 })
 
 test('apply registers a system-prompt/assemble and session/event listener', () => {
@@ -102,7 +102,7 @@ test('apply registers a system-prompt/assemble and session/event listener', () =
 })
 
 test('a fresh top-level session is seeded: events + real shared guide file', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state, warns } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -149,7 +149,7 @@ test('a fresh top-level session is seeded: events + real shared guide file', asy
 })
 
 test('injection is OFF by default: a fresh session is left untouched', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, {}) // no enabled flag, no settings file → panel default OFF
@@ -164,7 +164,7 @@ test('injection is OFF by default: a fresh session is left untouched', async () 
 })
 
 test('the persisted panel settings take effect on the next injection', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const settingsPath = join(cwd, 'panel-settings.json')
     writeFileSync(settingsPath, JSON.stringify({
@@ -205,7 +205,7 @@ test('the persisted panel settings take effect on the next injection', async () 
 })
 
 test('elevationSource config forces the explicit prompt', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, { enabled: true, elevationSource: 'config', elevationPrompt: 'Only the config prompt.' })
@@ -220,7 +220,7 @@ test('elevationSource config forces the explicit prompt', async () => {
 })
 
 test('elevationSource none emits the notice only', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, { enabled: true, elevationSource: 'none' })
@@ -234,7 +234,7 @@ test('elevationSource none emits the notice only', async () => {
 })
 
 test('AGENTS.md/CLAUDE.md are NOT injected by the plugin (harness owns them)', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
     writeFileSync(join(cwd, 'CLAUDE.md'), 'claude rules')
@@ -250,7 +250,7 @@ test('AGENTS.md/CLAUDE.md are NOT injected by the plugin (harness owns them)', a
 })
 
 test('virtual turn events carry turn 1 step 0 (no collision with the real first step)', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -265,14 +265,14 @@ test('virtual turn events carry turn 1 step 0 (no collision with the real first 
     // The virtual user message renders as a real user message but is durable-marked
     const user = session.events.find((e) => e.type === 'user/message')
     assert.equal(user.data.source.kind, 'user')
-    assert.equal(user.data.source.form, 'anchor-seed')
+    assert.equal(user.data.source.form, 'extrapro-anchor')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
 
 test('a session is seeded exactly once across repeated assemblies', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -289,7 +289,7 @@ test('a session is seeded exactly once across repeated assemblies', async () => 
 })
 
 test('subagents (depth or origin) are never seeded', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -305,7 +305,7 @@ test('subagents (depth or origin) are never seeded', async () => {
 })
 
 test('sessions that already produced a real user message are not seeded', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -327,7 +327,7 @@ test('sessions that already produced a real user message are not seeded', async 
 })
 
 test('a resumed anchor session keeps the minimal system replacement (durable detection)', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const session = makeSession({ cwd })
     seedTurn(session)
@@ -345,7 +345,7 @@ test('a resumed anchor session keeps the minimal system replacement (durable det
 })
 
 test('an interrupted partial seed is completed on the next assembly', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const events = buildVirtualTurn({
       command: `pwd && cat ${guideRelativePath()}`,
@@ -368,7 +368,7 @@ test('an interrupted partial seed is completed on the next assembly', async () =
 })
 
 test('a missing provider/model route refuses to seed instead of writing an unrestorable log', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state, warns } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -398,7 +398,7 @@ test('a file write failure degrades with a warning, no throw', async () => {
   const { ctx, state, warns } = makeCtx({ cwd: '/' })
   apply(ctx, SEED_ON)
   // Point cwd at a path whose parent is a FILE: creating .dsh must fail.
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   const blocker = join(cwd, 'block')
   writeFileSync(blocker, 'x')
   try {
@@ -413,26 +413,26 @@ test('a file write failure degrades with a warning, no throw', async () => {
 
 test('the guard failure path loads nothing (fail-safe)', async () => {
   const { ctx, state, errors } = makeCtx({ cwd: '/' })
-  process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL = '1'
+  process.env.DSH_EXTRAPRO_ANCHOR_FORCE_GUARD_FAIL = '1'
   try {
     apply(ctx, SEED_ON)
     assert.equal(state.listeners.get('system-prompt/assemble'), undefined)
     assert.ok(errors.length >= 1)
     assert.match(errors[0], /self-check FAILED/)
   } finally {
-    delete process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL
+    delete process.env.DSH_EXTRAPRO_ANCHOR_FORCE_GUARD_FAIL
   }
 })
 
 test('guard.enabled false bypasses the self-check', () => {
   const { ctx, state, errors } = makeCtx({ cwd: '/' })
-  process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL = '1'
+  process.env.DSH_EXTRAPRO_ANCHOR_FORCE_GUARD_FAIL = '1'
   try {
     apply(ctx, { guard: { enabled: false } })
     assert.equal(typeof state.listeners.get('system-prompt/assemble')?.at(-1)?.callback, 'function')
     assert.equal(errors.length, 0)
   } finally {
-    delete process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL
+    delete process.env.DSH_EXTRAPRO_ANCHOR_FORCE_GUARD_FAIL
   }
 })
 
@@ -471,7 +471,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
     elevationSource: 'config',
     elevationPrompt: 'X',
     enabled: true,
-    settingsPath: '/tmp/anchor-seed-settings.json',
+    settingsPath: '/tmp/extrapro-anchor-settings.json',
     virtualToolName: 'cat',
     virtualCommandTemplate: 'cat {path}',
     dynamicSections: ['plan:policy', 'plan:policy', 'future:mode'],
@@ -479,7 +479,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
   })
   assert.equal(custom.elevationSource, 'config')
   assert.equal(custom.enabled, true)
-  assert.equal(custom.settingsPath, '/tmp/anchor-seed-settings.json')
+  assert.equal(custom.settingsPath, '/tmp/extrapro-anchor-settings.json')
   assert.equal(custom.virtualToolName, 'cat')
   assert.equal(custom.virtualCommandTemplate, 'cat {path}')
   assert.deepEqual(custom.dynamicSections, ['plan:policy', 'future:mode'])
@@ -501,7 +501,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
 })
 
 test('virtual templates default to the pre-sampled minimal texts', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -522,7 +522,7 @@ test('virtual templates default to the pre-sampled minimal texts', async () => {
 })
 
 test('system sections are replaced with minimal persona + two-tool statement', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -552,7 +552,7 @@ test('system sections are replaced with minimal persona + two-tool statement', a
 })
 
 test('whitelisted dynamic sections are appended after the minimal system sections', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -581,7 +581,7 @@ test('whitelisted dynamic sections are appended after the minimal system section
 })
 
 test('guide content keeps the elevation but does not duplicate the tool catalog', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, SEED_ON)
@@ -610,7 +610,7 @@ test('guide content keeps the elevation but does not duplicate the tool catalog'
 })
 
 test('session title recovery regenerates from the real first message when a provider exists', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     let seenMessages
     const sessionTitle = {
@@ -650,7 +650,7 @@ test('session title recovery regenerates from the real first message when a prov
 })
 
 test('session title recovery appends a corrected fallback when no title provider exists', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'extrapro-anchor-'))
   try {
     const sessionTitle = {
       registration: undefined,

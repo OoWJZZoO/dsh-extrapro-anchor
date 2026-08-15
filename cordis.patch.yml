@@ -2,10 +2,10 @@
 # `dsh plugin --profile <name> add <repo>` composes this patch automatically
 # (see package.json → dsh.bundle). When used as an agent PRESET instead, copy
 # the whole `preset/` directory into the user preset root and name it
-# `anchor-seed` — do not combine both installation paths.
+# `extrapro-anchor` — do not combine both installation paths.
 - insert:
-    - id: anchor-seed
-      name: '@deepseek-ai/dsh-anchor-seed'
+    - id: extrapro-anchor
+      name: '@deepseek-ai/dsh-extrapro-anchor'
       config:
         # The preset's real prompt, placed after the elevation notice inside
         # the guide file. Leave empty (default) to auto-capture the non-persona
@@ -18,6 +18,6 @@
     # row above. In Web it registers the collapsible/draggable overlay: the
     # injection switch, the thinking-chain health readout, and the injected-text
     # editor. Self-contained preset installs do not mount this row (no panel).
-    - id: anchor-seed-panel
-      name: '@deepseek-ai/dsh-anchor-seed/panel'
+    - id: extrapro-anchor-panel
+      name: '@deepseek-ai/dsh-extrapro-anchor/panel'
       config: {}

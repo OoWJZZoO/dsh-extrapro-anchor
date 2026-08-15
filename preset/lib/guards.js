@@ -1,5 +1,5 @@
 /**
- * Environment self-check guard for anchor-seed (host side).
+ * Environment self-check guard for extrapro-anchor (host side).
  *
  * The plugin's whole effect is appending synthetic session events and writing
  * one file into the project. Both ride on harness internals that can change
@@ -12,7 +12,7 @@
  * plugin touches. On failure the caller writes the full diagnostics to a log
  * file, logs ONE short bilingual notice, and returns before installing any
  * hook. Bypass with `guard.enabled: false` in the composition row config, or
- * force the failure path with DSH_ANCHOR_SEED_FORCE_GUARD_FAIL=1 (tests).
+ * force the failure path with DSH_EXTRAPRO_ANCHOR_FORCE_GUARD_FAIL=1 (tests).
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -21,7 +21,7 @@ import { assertVirtualTurnAppendable, buildBashReadResult, buildVirtualTurn, gui
 
 /** Where the full diagnostics of a failed self-check are written. */
 export function guardLogPath() {
-  return join(homedir(), '.dsh', 'logs', 'dsh-anchor-seed-guard.log')
+  return join(homedir(), '.dsh', 'logs', 'dsh-extrapro-anchor-guard.log')
 }
 
 /**
@@ -49,7 +49,7 @@ export function writeGuardLog(problems, path = guardLogPath()) {
   try {
     const stamp = new Date().toISOString()
     const body = problems.map((p) => `- ${p.name}: ${p.detail}`).join('\n')
-    writeFileSync(path, `[${stamp}] anchor-seed environment self-check FAILED\n${body}\n`, 'utf8')
+    writeFileSync(path, `[${stamp}] extrapro-anchor environment self-check FAILED\n${body}\n`, 'utf8')
     return path
   } catch {
     return null
@@ -60,10 +60,10 @@ export function writeGuardLog(problems, path = guardLogPath()) {
 export function guardFailNotice(logPath) {
   const where = logPath || '<日志写入失败 / log write failed>'
   const zh =
-    'anchor-seed 插件加载自检未通过，已取消加载流程，完整诊断日志已写入 ' + where + '。' +
+    'extrapro-anchor 插件加载自检未通过，已取消加载流程，完整诊断日志已写入 ' + where + '。' +
     '若你清楚自己在做什么，可在 preset 组合行的 config 中将 guard.enabled 置为 false，跳过自检并强行加载插件。'
   const en =
-    'anchor-seed plugin environment self-check FAILED and loading was cancelled; the full diagnostic log is at ' + where + '. ' +
+    'extrapro-anchor plugin environment self-check FAILED and loading was cancelled; the full diagnostic log is at ' + where + '. ' +
     'If you know what you are doing, set guard.enabled to false in the composition row config to skip the self-check and force-load the plugin.'
   return zh + '\n' + en
 }

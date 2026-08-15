@@ -1,27 +1,27 @@
-// anchor-seed floating panel — browser half.
+// extrapro-anchor floating panel — browser half.
 //
 // Collapsible, draggable overlay registered into the shell's root
 // `shell.overlay` slot. Collapsed by default (and injection OFF by default):
 // the pill shows only the injection switch and the live thinking-chain health.
 // Expanded, it edits the four injected texts; edits are cached in the browser
-// and flushed to the host disk (anchorSeedConfig.set) when the panel is
+// and flushed to the host disk (extraproAnchorConfig.set) when the panel is
 // folded or when the next injection is observed (a new session id appears).
 //
-// The client half is a COMPANION ROW (`@deepseek-ai/dsh-anchor-seed/panel`)
+// The client half is a COMPANION ROW (`@deepseek-ai/dsh-extrapro-anchor/panel`)
 // so it can be hot-added to a running profile without the host row losing its
 // package-metadata cache. The bundle id must stay byte-identical to that row
 // name. The default texts below are duplicated from lib/settings.js (and the
 // health classifier from lib/health.js) — this standalone browser bundle
 // cannot import the host half; update both sides together.
 window.__ModuleLoader__.load({
-	id: "@deepseek-ai/dsh-anchor-seed/panel",
+	id: "@deepseek-ai/dsh-extrapro-anchor/panel",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		const react = require("react");
 
-		const NS = "anchor-seed-panel";
+		const NS = "extrapro-anchor-panel";
 
 		// ── stylesheet (DeepSeek Harness token surface) ──────────────────────
 		const CSS = `
@@ -75,10 +75,10 @@ window.__ModuleLoader__.load({
 .ashp_button:disabled{opacity:.5;cursor:default}
 @media (prefers-reduced-motion:reduce){.ashp_switch,.ashp_thumb{transition:none}}
 `;
-		const styleTagId = "@deepseek-ai/dsh-anchor-seed/panel/panel.css";
+		const styleTagId = "@deepseek-ai/dsh-extrapro-anchor/panel/panel.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(styleTagId) + "]") === null) {
 			const tag = document.createElement("style");
-			tag.dataset.plugin = "@deepseek-ai/dsh-anchor-seed/panel";
+			tag.dataset.plugin = "@deepseek-ai/dsh-extrapro-anchor/panel";
 			tag.dataset.pluginCss = styleTagId;
 			tag.textContent = CSS;
 			document.head.appendChild(tag);
@@ -108,7 +108,7 @@ window.__ModuleLoader__.load({
 		function looseSchema() {
 			return {
 				mode: "strict",
-				typeSymbol: "dsh-anchor-seed#unknown",
+				typeSymbol: "dsh-extrapro-anchor#unknown",
 				schema: {
 					_zod: { def: {}, constr: null, traits: new Set() },
 					parse: (value) => value,
@@ -116,21 +116,21 @@ window.__ModuleLoader__.load({
 			};
 		}
 		const CONTRIBUTION = {
-			package: "@deepseek-ai/dsh-anchor-seed/panel",
+			package: "@deepseek-ai/dsh-extrapro-anchor/panel",
 			descriptors: [
 				{
-					id: "@deepseek-ai/dsh-anchor-seed#anchorSeedConfig/get",
-					service: "anchorSeedConfig",
-					namespace: "anchorSeedConfig",
+					id: "@deepseek-ai/dsh-extrapro-anchor#extraproAnchorConfig/get",
+					service: "extraproAnchorConfig",
+					namespace: "extraproAnchorConfig",
 					method: "get",
 					invocation: { kind: "direct" },
 					parameters: [],
 					result: looseSchema(),
 				},
 				{
-					id: "@deepseek-ai/dsh-anchor-seed#anchorSeedConfig/set",
-					service: "anchorSeedConfig",
-					namespace: "anchorSeedConfig",
+					id: "@deepseek-ai/dsh-extrapro-anchor#extraproAnchorConfig/set",
+					service: "extraproAnchorConfig",
+					namespace: "extraproAnchorConfig",
 					method: "set",
 					invocation: { kind: "direct" },
 					parameters: [
@@ -269,7 +269,7 @@ window.__ModuleLoader__.load({
 			}
 			async load() {
 				if (!this.remote) {
-					this.fail("anchorSeedConfig 端点不可用（宿主端配置桥未注册？刷新或稍后重试）");
+					this.fail("extraproAnchorConfig 端点不可用（宿主端配置桥未注册？刷新或稍后重试）");
 					return;
 				}
 				this.publish({ status: "loading", error: null });
@@ -324,7 +324,7 @@ window.__ModuleLoader__.load({
 				else this.publish({ settings: result.settings, saving: false, ...this.projectDirty() });
 			}
 			async setSettings(next) {
-				if (!this.remote) return { ok: false, error: "anchorSeedConfig 端点不可用" };
+				if (!this.remote) return { ok: false, error: "extraproAnchorConfig 端点不可用" };
 				try {
 					const result = await this.remote.set(next);
 					if (result?.ok) {
@@ -422,7 +422,7 @@ window.__ModuleLoader__.load({
 			return react.useSyncExternalStore(subscribe, get, get);
 		}
 		const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-		const POSITION_KEY = "dsh-anchor-seed-panel-position";
+		const POSITION_KEY = "dsh-extrapro-anchor-panel-position";
 		function loadPosition() {
 			try {
 				const raw = window.localStorage.getItem(POSITION_KEY);
@@ -549,7 +549,7 @@ window.__ModuleLoader__.load({
 					style: { right: position.right, top: position.top },
 					role: "region",
 					"aria-label": t("aria"),
-					"data-anchor-seed-panel": true,
+					"data-extrapro-anchor-panel": true,
 				},
 					react.createElement("button", { type: "button", className: "ashp_grip", "aria-label": t("drag"), title: t("drag"), ...dragProps }, "⠿"),
 					react.createElement("button", {
@@ -644,7 +644,7 @@ window.__ModuleLoader__.load({
 				style: { right: position.right, top: position.top },
 				role: "region",
 				"aria-label": t("aria"),
-				"data-anchor-seed-panel": true,
+				"data-extrapro-anchor-panel": true,
 			},
 				react.createElement("div", { className: "ashp_head" },
 					react.createElement("button", { type: "button", className: "ashp_grip", "aria-label": t("drag"), title: t("drag"), tabIndex: -1, ...dragProps }, "⠿"),
@@ -753,12 +753,12 @@ window.__ModuleLoader__.load({
 			const missing = needed.filter(([, ok]) => !ok).map(([name]) => name);
 			if (missing.length > 0) {
 				console.error(
-					"dsh-anchor-seed 面板客户端自检未通过，面板未激活（web 界面不受影响）。缺失: " + missing.join(", ") + "\n" +
-					"dsh-anchor-seed panel client self-check failed, panel inactive (web unaffected). Missing: " + missing.join(", "),
+					"dsh-extrapro-anchor 面板客户端自检未通过，面板未激活（web 界面不受影响）。缺失: " + missing.join(", ") + "\n" +
+					"dsh-extrapro-anchor panel client self-check failed, panel inactive (web unaffected). Missing: " + missing.join(", "),
 				);
 				return;
 			}
-			ctx.effect(() => ctx.locale.register(NS, { zh, en }), "anchor-seed-panel: dictionaries");
+			ctx.effect(() => ctx.locale.register(NS, { zh, en }), "extrapro-anchor-panel: dictionaries");
 			const t = ctx.locale.bind(NS);
 			const controller = new PanelController(null, ctx.sessions);
 			// Register the overlay FIRST: the panel must appear even while (or
@@ -770,12 +770,12 @@ window.__ModuleLoader__.load({
 				slotRegistered = true;
 				const dispose = ctx.slots.register({
 					name: "shell.overlay",
-					id: "anchor-seed",
+					id: "extrapro-anchor",
 					order: 20,
 					locale: NS,
 					inject: () => ({ controller, t }),
 				}, AnchorPanel);
-				console.info("[anchor-seed] panel registered on shell.overlay");
+				console.info("[extrapro-anchor] panel registered on shell.overlay");
 				return dispose;
 			});
 			const declarationProbe = setInterval(() => {
@@ -785,22 +785,22 @@ window.__ModuleLoader__.load({
 				}
 				if (Date.now() - registeredAt > 8000) {
 					clearInterval(declarationProbe);
-					console.error("[anchor-seed] shell.overlay 未被声明，面板未挂载（前端版本过旧？）");
+					console.error("[extrapro-anchor] shell.overlay 未被声明，面板未挂载（前端版本过旧？）");
 				}
 			}, 1000);
 			// Mount our own Remote namespace asynchronously and bounded: a
 			// hanging gateway must never strand the plugin's activation.
 			const mountRemote = async () => {
 				const timeout = new Promise((_, reject) => {
-					setTimeout(() => reject(new Error("anchorSeedConfig 挂载超时")), 4000);
+					setTimeout(() => reject(new Error("extraproAnchorConfig 挂载超时")), 4000);
 				});
 				try {
 					await Promise.race([ctx.remote.$mount(CONTRIBUTION), timeout]);
-					controller.remote = ctx.get("remote.anchorSeedConfig") ?? null;
-					if (!controller.remote) controller.fail("anchorSeedConfig 端点不可用（宿主端配置桥未注册？刷新或稍后重试）");
+					controller.remote = ctx.get("remote.extraproAnchorConfig") ?? null;
+					if (!controller.remote) controller.fail("extraproAnchorConfig 端点不可用（宿主端配置桥未注册？刷新或稍后重试）");
 					else void controller.load().catch(() => {});
 				} catch (error) {
-					controller.fail("anchorSeedConfig 端点不可用：" + String(error?.message ?? error));
+					controller.fail("extraproAnchorConfig 端点不可用：" + String(error?.message ?? error));
 				}
 			};
 			void mountRemote();

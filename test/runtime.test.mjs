@@ -62,8 +62,8 @@ function loggedFrom(tuples, startSeq = 0) {
 }
 
 test('exports a diagnostic plugin name and anchor marker', () => {
-  assert.equal(PLUGIN_NAME, 'anchor-seed')
-  assert.equal(ANCHOR_USER_SOURCE_FORM, 'anchor-seed')
+  assert.equal(PLUGIN_NAME, 'dsh-extrapro-anchor')
+  assert.equal(ANCHOR_USER_SOURCE_FORM, 'extrapro-anchor')
 })
 
 test('guide path is the single shared file under .dsh', () => {
@@ -106,7 +106,7 @@ test('buildVirtualTurn emits the four events in append order with matching ids',
   assert.equal(user.data.content[0].text.includes(DISPLAY_PATH), true)
   // The virtual user stays kind 'user' for the trajectory UI, but carries a
   // durable form marker so title recovery and audits can tell it apart.
-  assert.deepEqual(user.data.source, { kind: 'user', form: 'anchor-seed' })
+  assert.deepEqual(user.data.source, { kind: 'user', form: 'extrapro-anchor' })
 
   assert.equal(assistant.opts.surfaceOp, 'append')
   assert.equal(assistant.data.message.role, 'assistant')
@@ -277,6 +277,20 @@ test('inspectAnchorTurn / isAnchorSeeded / hasPartialAnchorTurn read durable sta
     opts: { surfaceOp: 'append' },
   }
   assert.equal(inspectAnchorTurn(makeSession([real]), DISPLAY_PATH).userPresent, false)
+})
+
+test('durable detection recognizes the pre-rename anchor-seed form marker', () => {
+  const events = makeTurn()
+  const complete = loggedFrom(events)
+  complete[3] = { ...complete[3], opts: { surfaceOp: 'append', sourceEventSeqs: [2] } }
+  complete[0] = {
+    ...complete[0],
+    data: { ...complete[0].data, source: { kind: 'user', form: 'anchor-seed' } },
+  }
+  const session = makeSession(complete)
+  assert.equal(inspectAnchorTurn(session, DISPLAY_PATH).complete, true)
+  assert.equal(isAnchorSeeded({ session }), true)
+  assert.equal(hasPartialAnchorTurn({ session }), false)
 })
 
 test('DEFAULT_ELEVATION_NOTICE matches the designed sentence', () => {

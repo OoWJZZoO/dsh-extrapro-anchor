@@ -1,6 +1,6 @@
 {
-  "name": "@deepseek-ai/dsh-anchor-seed-panel",
-  "description": "anchor-seed floating panel companion: collapsible, draggable Web overlay for the injection switch, chain health, and injected-text editing",
+  "name": "@deepseek-ai/dsh-extrapro-anchor-panel",
+  "description": "extrapro-anchor floating panel companion: collapsible, draggable Web overlay for the injection switch, chain health, and injected-text editing",
   "type": "module",
   "main": "./index.js",
   "exports": {

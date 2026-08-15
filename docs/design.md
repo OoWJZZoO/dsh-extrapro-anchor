@@ -40,7 +40,7 @@
 
 | 事件 | surface 元数据 | 数据要点 |
 |---|---|---|
-| `user/message` | `surfaceOp: append` | role user;请求读 guide;source 为 `{ kind: 'user', form: 'anchor-seed' }`(kind 让轨迹 UI 开 user turn,form 用于 durable 识别与审计) |
+| `user/message` | `surfaceOp: append` | role user;请求读 guide;source 为 `{ kind: 'user', form: 'extrapro-anchor' }`(kind 让轨迹 UI 开 user turn,form 用于 durable 识别与审计) |
 | `assistant/message` | `surfaceOp: append` | `turn:1, step:0`;content = `reasoning` 块 + `tool-call` 块;`arguments` 为 `{command}` 的 JSON 字符串 |
 | `tool/call` | 无(非 surface) | `{turn:1, step:0, callId, name, arguments}` |
 | `tool/result` | `surfaceOp: append` + `sourceEventSeqs: [callSeq]` | `tool-result` 块,内容为 `pwd && cat <guide>` 的原始 stdout(`<cwd>\n<内容>`) |
@@ -83,8 +83,10 @@ schema 决定;旧的 minimal 工具名不属于真实可调用面,无需可见�
 - `isTopLevelAgent`:仅顶层(`delegationDepth === 0` 且 `origin !== 'subagent'`);
   `isFreshTopLevelAgent` 再要求尚无任何 `user/message`;
 - 是否已锚定由 **durable 日志**判定(`inspectAnchorTurn`):虚拟 user 带
-  `form: 'anchor-seed'` marker,旧日志按 `{kind:'user'}` + guide 路径识别。因此
-  resume/reload 后 system 仍保持 minimal 替换,不再依赖进程内状态;
+  `form: 'extrapro-anchor'` marker;更早的 pre-release 日志用 `form: 'anchor-seed'`
+  (已列入 `LEGACY_ANCHOR_USER_SOURCE_FORMS`),再早的无 marker 日志按 `{kind:'user'}`
+  + guide 路径识别。因此 resume/reload 后 system 仍保持 minimal 替换,不再依赖进程内
+  状态;
 - `appendVirtualTurn` 幂等且可补全:完整轮次直接 no-op;被中断的半成品只追加缺失的
   尾部事件(call id 复用日志中已有值);
 - 进程内 `WeakSet<agent>` 是快速路径/双保险;同一 session 的并发 assemble 共享一个
@@ -116,7 +118,7 @@ schema 决定;旧的 minimal 工具名不属于真实可调用面,无需可见�
     硬断言、轨迹渲染异常(2026-08-15 实测)。step 0 避开该 id;turn 用 1(而非 0)让
     `firstVisibleTurn` 把 Initial System Prompt 定位在虚拟轮之前(2026-08-15 用户
     指出:turn 0 使 system 显示在 TOOL call 之后)。虚拟 user 的 `source.kind` 为
-    'user',轨迹 UI 将其渲染为真实用户消息(opensTurn);额外 `form: 'anchor-seed'`
+    'user',轨迹 UI 将其渲染为真实用户消息(opensTurn);额外 `form: 'extrapro-anchor'`
    用于 durable 识别。标题副作用已修复:观察到引用虚拟消息的 `session/title` 且真实
    首条消息已存在后,插件按真实消息纠正标题——title provider 可达时直接生成
    provider 标题,否则追加由真实消息派生的修正 fallback(内置 first-prompt provider

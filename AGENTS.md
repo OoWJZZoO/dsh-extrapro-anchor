@@ -1,4 +1,4 @@
-# AGENTS.md — dsh-anchor-seed contributor guide
+# AGENTS.md — dsh-extrapro-anchor contributor guide
 
 This file helps AI agents (and humans) work on this repository without
 breaking its contract with DeepSeek Harness.
@@ -22,7 +22,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   atomic writes). No Cordis imports.
 - `lib/health.js` — thinking-chain health classifier derived from the
   reference repos (modeltest trigger probe + dsh-anchored-standard tables).
-- `lib/config-remote.js` — `anchorSeedConfig` Typert Remote bridge builder;
+- `lib/config-remote.js` — `extraproAnchorConfig` Typert Remote bridge builder;
   receives the protocol namespace as a parameter so the module itself has no
   external imports (preset copies must stay self-contained).
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
@@ -32,10 +32,10 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   `__ModuleLoader__` browser bundle `client.js` (floating overlay, switch,
   health, text editor).
 - `preset/` — self-contained example preset (minimal persona + Standard tools
-  + the anchor-seed row, `enabled: true` because presets ship no panel).
+  + the extrapro-anchor row, `enabled: true` because presets ship no panel).
   `preset/lib/` is a BUILD SNAPSHOT: after changing `lib/`, run
   `./scripts/build-preset.sh`.
-- `test/` — `node --test`; run `npm test` (86 tests incl. the reference
+- `test/` — `node --test`; run `npm test` (87 tests incl. the reference
   dsh-anchored-standard tree under this checkout). `lib/runtime.js`,
   `lib/settings.js`, and `lib/health.js` must stay testable with zero harness
   dependencies.
@@ -49,7 +49,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 2. **Never re-seed.** `isFreshTopLevelAgent` (no prior `user/message`, top
    level only) plus the per-process WeakSet guarantee one seed per session.
    Whether a session is already anchored is decided from the DURABLE log
-   (`form: 'anchor-seed'` marker / `inspectAnchorTurn`), so resume/reload keeps
+   (`form: 'extrapro-anchor'` marker / `inspectAnchorTurn`), so resume/reload keeps
    the minimal system replacement. A partial seed is completed, never restarted.
 3. **The transcript must be internally consistent.** The virtual turn runs
    on the minimal preset's REAL surface: `bash` (there is no `read` tool in
@@ -80,7 +80,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    render; step 0 avoids that key. Turn 1 (not 0) keeps the Initial System
    Prompt (`firstVisibleTurn`) ahead of the virtual prelude. The virtual
    user message uses `source.kind: 'user'` so the UI renders it as a real
-   user message (opens a turn), plus `source.form: 'anchor-seed'` so the
+   user message (opens a turn), plus `source.form: 'extrapro-anchor'` so the
    durable log can distinguish it from real human input and recover the
    session title from the real first message.
 6. **The plugin replaces the system prompt itself — no preset precondition.**
@@ -107,7 +107,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    composes AGENTS.md/CLAUDE.md into `agent/pre-step` decisions AFTER the
    claimed real user messages. That matches the standard convention the user
    asked for (2026-08-15): virtual turn → user's real first message →
-   AGENTS.md. anchor-seed never appends an instructions message itself and
+   AGENTS.md. extrapro-anchor never appends an instructions message itself and
    registers no `agent/pre-step` listener. `injectProjectInstructions` /
    `maxInstructionsBytes` are accepted for backward compatibility but inert.
 
@@ -130,13 +130,13 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 ## Working on the floating panel
 
 - **One row id, five matching spellings.** The panel is a companion row named
-  `@deepseek-ai/dsh-anchor-seed/panel`. These must stay byte-identical: the
+  `@deepseek-ai/dsh-extrapro-anchor/panel`. These must stay byte-identical: the
   row name in `cordis.patch.yml`, the root package `exports["./panel"]`,
   `exports["./panel/package.json"]` / `"./panel/*"`, the nested
   `panel/package.json` `exports["./client"]`, and the
   `window.__ModuleLoader__.load({ id })` string in `panel/client.js`.
 - **Disk is the truth.** The switch saves immediately through
-  `anchorSeedConfig.set`; text drafts are cached in the browser and flushed on
+  `extraproAnchorConfig.set`; text drafts are cached in the browser and flushed on
   fold or when the panel observes a NEW session id ("cache lands at the next
   injection"). The host re-reads `settings.json` on mtime change before every
   fresh seed. Invalid templates (missing `{path}`) are refused by BOTH the
@@ -157,7 +157,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   loaded in running profiles, so its package metadata is cached and a new
   client manifest would not be re-scanned until restart; the companion row is
   a NEW entry id and can be hot-added. The root package also must stay
-  resolvable from `$DSH_HOME/.agent-presets/anchor-seed/lib` for the preset
+  resolvable from `$DSH_HOME/.agent-presets/extrapro-anchor/lib` for the preset
   path.
 - **The panel bundle duplicates two host modules** (defaults from
   `lib/settings.js`, health classifier from `lib/health.js`) because a served
@@ -178,7 +178,7 @@ npm run check     # syntax check lib/* + panel/* + full test run
 
 Before shipping: confirm the exported JSONL of a fresh session shows exactly
 the seeded event sequence (user/message with
-`source = { kind: 'user', form: 'anchor-seed' }` → assistant/message →
+`source = { kind: 'user', form: 'extrapro-anchor' }` → assistant/message →
 tool/call → tool/result, then the real user message and harness-injected
 AGENTS.md) with correct surface metadata, the shared guide file
 `.dsh/agent-dev-guide.md` matches the virtual result body, and the first

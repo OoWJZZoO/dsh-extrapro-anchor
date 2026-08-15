@@ -1,5 +1,5 @@
 /**
- * anchor-seed runtime settings: the floating panel's host-side persistence.
+ * extrapro-anchor runtime settings: the floating panel's host-side persistence.
  *
  * The panel edits four injected texts plus the injection on/off switch. Those
  * values are cached in the browser and written to this JSON file when the
@@ -57,13 +57,13 @@ export function defaultSettings() {
 
 /** Global settings file. Overridable for tests/deployments. */
 export function settingsFilePath() {
-  const override = process.env.DSH_ANCHOR_SEED_SETTINGS_PATH
+  const override = process.env.DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH
   if (typeof override === 'string' && override.trim().length > 0) {
     return isAbsolute(override.trim()) ? override.trim() : resolve(override.trim())
   }
   const home = process.env.DSH_HOME
   const root = typeof home === 'string' && home.trim().length > 0 ? resolve(home.trim()) : join(homedir(), '.dsh')
-  return join(root, 'storages', 'anchor-seed', 'settings.json')
+  return join(root, 'storages', 'extrapro-anchor', 'settings.json')
 }
 
 function isRecord(value) {
@@ -218,7 +218,7 @@ export function createSettingsStore({ path = settingsFilePath(), fallback = {} }
       try {
         raw = JSON.parse(text)
       } catch (error) {
-        warnings.push(`anchor-seed: 配置文件解析失败，已使用默认值（${String((error && error.message) || error)}）`)
+        warnings.push(`extrapro-anchor: 配置文件解析失败，已使用默认值（${String((error && error.message) || error)}）`)
       }
     }
     cache = { mtimeMs, raw, effective: effectiveSettings(raw, fallback), warnings }

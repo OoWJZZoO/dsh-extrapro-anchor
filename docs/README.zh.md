@@ -1,4 +1,4 @@
-# dsh-anchor-seed
+# dsh-extrapro-anchor
 
 [English](../README.md)
 
@@ -12,7 +12,7 @@
 
 - `anchored-standard` 靠"首请求只给两个工具、等待真实 `tool/call` 后再晋升"来锚定
   轨迹——锚定依赖模型真实行为;
-- `anchor-seed` 让锚定**确定性**发生:在首个请求之前把一轮虚拟回合追加进 session 日志。
+- `extrapro-anchor` 让锚定**确定性**发生:在首个请求之前把一轮虚拟回合追加进 session 日志。
   模型什么都不用做,首个真实请求就同时拥有完整工具目录和一段"刚完成 onboarding 读取的
   minimal 会话"历史。
 - 附带一个**前台悬浮面板**(默认折叠、默认关闭、位于网页右侧):一键开关锚定注入、实时
@@ -78,7 +78,7 @@ DeepSeek V4 Pro 会强烈依赖首轮 API 可见工具目录与请求结构(mode
 - **首轮两工具锚定、随后晋升到全部 25 工具 → 轨迹保持(98/99)**——关键在首轮策略
   选择,完整工具之后仍可用。
 
-`anchored-standard` 用"真实工具调用后晋升"复现了这一点;`anchor-seed` 用预先采样的
+`anchored-standard` 用"真实工具调用后晋升"复现了这一点;`extrapro-anchor` 用预先采样的
 虚拟首轮替换真实首轮,于是:
 
 - 锚定确定性成立,不依赖模型首个动作;
@@ -97,12 +97,12 @@ DeepSeek V4 Pro 会强烈依赖首轮 API 可见工具目录与请求结构(mode
 | 配置 | Ability | hidden | ESP static | 真实构建 |
 |---|---:|---:|---:|---|
 | minimal 原生(无 anchor) | **97** | 43/45 | 9/9 | 通过(模型会话内自驱动) |
-| standard + anchor-seed | **96** | 44/45 | 9/9 | 失败(编译错误) |
-| code(PTC)+ anchor-seed | **88** | 42/45 | 8/9 | 失败(configure 阶段) |
+| standard + extrapro-anchor | **96** | 44/45 | 9/9 | 失败(编译错误) |
+| code(PTC)+ extrapro-anchor | **88** | 42/45 | 8/9 | 失败(configure 阶段) |
 
 对照原作者无 anchor 基线(同模型、`max`、WSL、官方 API):
 
-| 配置 | 无 anchor(原作者) | + anchor-seed(本次) | Δ |
+| 配置 | 无 anchor(原作者) | + extrapro-anchor(本次) | Δ |
 |---|---:|---:|---:|
 | minimal | 99/96(2 工具 wire) | 97(25 工具 wire,harness 版本差异) | 不可直接比\* |
 | standard | 91 | **96** | **+5** |
@@ -130,38 +130,60 @@ schema(原作者的 harness 只发 2 个工具),因此本机 minimal 原生 97 �
 
 ## 安装
 
+需要 DeepSeek Harness(`dsh`)`0.1.0-rc.6` 或更高版本(harness 处于开发者预览期;
+更新版本的 RC 可能需要做兼容适配)。
+
 ### 方式一:自包含 preset(推荐,同 anchored-standard)
 
 ```sh
 dsh_home="${DSH_HOME:-$HOME/.dsh}"
 mkdir -p "$dsh_home/.agent-presets"
-test ! -e "$dsh_home/.agent-presets/anchor-seed"
-cp -R preset "$dsh_home/.agent-presets/anchor-seed"
+test ! -e "$dsh_home/.agent-presets/extrapro-anchor"
+cp -R preset "$dsh_home/.agent-presets/extrapro-anchor"
 ```
 
-完整重启 DeepSeek Harness,新建空白会话,选择 **Anchor Seed (experimental)**。
+完整重启 DeepSeek Harness,新建空白会话,选择 **ExtraPro Anchor (experimental)**。
 不要在已有内容的会话中途切换 preset。示例组合保留 Minimal system prompt(complete)
 并挂载完整 Standard 工具集——即 anchored-standard 的表面,去掉 bootstrap,加上种子。
-自包含 preset 不带悬浮面板,因此其 `anchor-seed` 行写死了 `enabled: true`;这种安装方式
+自包含 preset 不带悬浮面板,因此其 `extrapro-anchor` 行写死了 `enabled: true`;这种安装方式
 下注入默认开启。
 
 ### 方式二:作为 bundle 插件叠加到自有 preset
 
-用 `dsh plugin add` 安装(其 `cordis.patch.yml` 会自动插入宿主 `anchor-seed` 行和
-`anchor-seed-panel` 面板伴随行),或手工插入两行:
+本包通过 `dsh.bundle` 清单发布 `cordis.patch.yml`,profile bundle 机制会自动合成插件
+行。推荐一行安装:
+
+```sh
+dsh plugin --profile <profile> add github:OoWJZZoO/dsh-extrapro-anchor
+```
+
+然后重启 `dsh web`(或让 profile patch 热加载器热加插件行)并刷新现有页面,右侧会
+出现折叠的悬浮面板。bundle 安装方式下注入**默认关闭**——把面板上的开关打开一次即可
+启用。
+
+手工安装:添加依赖、插入两行、重启。
+
+```json
+// ~/.dsh/profiles/<profile>/package.json → dependencies
+"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.2.0"
+```
+
+```sh
+cd ~/.dsh/profiles/<profile> && pnpm install
+```
 
 ```yaml
-- id: anchor-seed
-  name: '@deepseek-ai/dsh-anchor-seed'
+- id: extrapro-anchor
+  name: '@deepseek-ai/dsh-extrapro-anchor'
   config:
     elevationPrompt: ''   # '' → 自动捕获非 persona 提示词段
-- id: anchor-seed-panel
-  name: '@deepseek-ai/dsh-anchor-seed/panel'
+- id: extrapro-anchor-panel
+  name: '@deepseek-ai/dsh-extrapro-anchor/panel'
   config: {}
 ```
 
-重启 `dsh web`(或用 profile patch 热加载器热加面板行)后刷新现有页面,右侧会出现
-折叠的悬浮面板。bundle 安装方式下注入**默认关闭**——把面板上的开关打开一次即可启用。
+> **两种方式不要混用**:`dsh plugin add` 已经合成两行,手工加依赖同时又插行会重复
+> 注册插件。
 
 锚定按设计生效的前提:
 
@@ -170,12 +192,12 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
   guide 文件(elevation),由虚拟轮揭示;
 - 工作区指令(AGENTS.md/CLAUDE.md)由 **harness 而非插件**注入:harness 自带
   `dsh-agent-instructions`(dsh-base 依赖)在用户真实首条消息之后编排它们(标准惯例)。
-  anchor-seed 不自行注入指令,也无需去重。`injectProjectInstructions` /
+  extrapro-anchor 不自行注入指令,也无需去重。`injectProjectInstructions` /
   `maxInstructionsBytes` 配置键为兼容保留,实际无作用。
 
 ## 悬浮面板(Web)
 
-伴随行 `@deepseek-ai/dsh-anchor-seed/panel` 在页面浮层里注册一个可拖动、可折叠的面板,
+伴随行 `@deepseek-ai/dsh-extrapro-anchor/panel` 在页面浮层里注册一个可拖动、可折叠的面板,
 默认位于右侧、处于折叠状态,注入开关默认**关闭**:
 
 - **折叠时**只显示两样:注入开关和思考链健康度;
@@ -193,8 +215,8 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
 standard 轮 `let me = 208`)。因此最近的思考块里一旦出现 `let me`,读数立即变黄/变红;
 稳定 `we` 风格显示绿色和 0–100 分。
 
-设置持久化在 `$DSH_HOME/storages/anchor-seed/settings.json`(可用环境变量
-`DSH_ANCHOR_SEED_SETTINGS_PATH` 覆盖)。宿主插件在每次 fresh seed 前按文件 mtime
+设置持久化在 `$DSH_HOME/storages/extrapro-anchor/settings.json`(可用环境变量
+`DSH_EXTRAPRO_ANCHOR_SETTINGS_PATH` 覆盖)。宿主插件在每次 fresh seed 前按文件 mtime
 重读——磁盘即事实。
 
 ## 配置(组合行 `config`)
@@ -202,7 +224,7 @@ standard 轮 `let me = 208`)。因此最近的思考块里一旦出现 `let me`,
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `false`(面板姿态;自包含 preset 写 `true`) | 无面板设置文件时的注入开关兜底。面板落盘值在 seed 时覆盖此值。 |
-| `settingsPath` | `$DSH_HOME/storages/anchor-seed/settings.json` | 面板设置文件路径覆盖(测试/特殊部署用)。 |
+| `settingsPath` | `$DSH_HOME/storages/extrapro-anchor/settings.json` | 面板设置文件路径覆盖(测试/特殊部署用)。 |
 | `elevationPrompt` | `''` | 放在 elevation 句子之后的 preset 真实提示词。 |
 | `elevationSource` | `auto` | `auto`:捕获组装中的非 persona 提示词段(空则回退 `elevationPrompt`);`config`:只用 `elevationPrompt`;`none`:只有句子。 |
 | `elevationNotice` | `When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:` | 固定框架句。 |
@@ -216,16 +238,26 @@ standard 轮 `let me = 208`)。因此最近的思考块里一旦出现 `let me`,
 | `maxInstructionsBytes` | `65536` | **惰性(兼容保留)。** 见 `injectProjectInstructions`。 |
 | `guard.enabled` | `true` | 环境自检开关;`false` 跳过自检强行加载。 |
 
+## 安全
+
+本插件依赖的部分 harness 内部契约可能随版本升级改变形态。启动时插件会对所有触及的
+harness 契约做环境自检(`lib/guards.js`,即 `dsh-read-image` 的 fail-safe 模式)。
+任一检查失败时插件**安全失败**:不加载任何东西、harness 照常启动——完整诊断写入
+`~/.dsh/logs/dsh-extrapro-anchor-guard.log`,前台只打一条双语提示。若你清楚自己在做
+什么,可在组合行 `config` 中设置 `guard.enabled: false` 跳过自检强行加载。伴随面板在
+浏览器端执行同样的客户端自检,缺失任一浏览器服务时只记日志、不安装任何东西,web boot
+不受影响。
+
 ## 验证加载
 
-面板(bundle 安装):刷新页面后右侧出现折叠胶囊;
-`curl http://127.0.0.1:<web 端口>/plugins/@deepseek-ai/dsh-anchor-seed/panel/client.js`
-能取到客户端 bundle;第一次拨动开关或收起带修改的面板后,
-`$DSH_HOME/storages/anchor-seed/settings.json` 落盘。
+面板(bundle 安装):刷新页面后右侧出现折叠胶囊;客户端 bundle 位于你的 web origin 下
+`<web-origin>/plugins/@deepseek-ai/dsh-extrapro-anchor/panel/client.js`;
+第一次拨动开关或收起带修改的面板后,
+`$DSH_HOME/storages/extrapro-anchor/settings.json` 落盘。
 
 导出 session JSONL,检查首轮事件:
 
-- 一个 `user/message`(source 为 `{ kind: 'user', form: 'anchor-seed' }`)、一个含
+- 一个 `user/message`(source 为 `{ kind: 'user', form: 'extrapro-anchor' }`)、一个含
   `reasoning` 块与单个 `tool-call` 的 `assistant/message`、一个 `tool/call`、一个
   内容为 guide 文件的 `tool/result`;
 - `tool/result` 带 `surfaceOp: append` 与 `sourceEventSeqs: [<tool/call seq>]`;
@@ -261,13 +293,13 @@ npm test
   一次告警,会话不带锚定继续运行;插件钩子绝不向 harness 抛错。
 - 插件无外部网络请求、无遥测(面板只与本机宿主的 Typert Remote 桥通信)。
 - 与 shell 同级信任:插件会向项目写入共享 guide 文件(`.dsh/agent-dev-guide.md`),
-  并向 `$DSH_HOME/storages/anchor-seed/` 写入面板设置;请把 `.dsh/` 加入项目
+  并向 `$DSH_HOME/storages/extrapro-anchor/` 写入面板设置;请把 `.dsh/` 加入项目
   .gitignore。
 
 ## 已知限制
 
-- 默认虚拟对话文本是**一轮真实采样的逐字原文**(`session-1018c36f`,minimal preset,
-  由 `scripts/find-best-sampling-round.mjs` 按 modeltest 指纹选出)。属于 n=1 采样:
+- 默认虚拟对话文本是**一轮真实采样的逐字原文**(minimal preset,由
+  `scripts/find-best-sampling-round.mjs` 按 modeltest 指纹选出)。属于 n=1 采样:
   若你有更合适的轮次,可用 `virtualUserTemplate`/`virtualReasoningTemplate` 替换。
 - 虚拟工具结果是 `pwd && cat <guide>` 的虚构 stdout(`<cwd>\n<内容>`)。若覆盖
   `virtualCommandTemplate`,请保持结果格式与该命令真实输出一致。
@@ -282,7 +314,7 @@ npm test
 `lib/runtime.js` 是纯逻辑(无 harness 依赖,完全可单测);`lib/index.js` 是 Cordis
 宿主插件;`lib/guards.js` 是 fail-safe 环境自检(dsh-read-image 模式);
 `lib/settings.js` 是面板设置的磁盘存储;`lib/health.js` 是参考仓库派生的思考链健康度
-分类器;`lib/config-remote.js` 构造 `anchorSeedConfig` Typert Remote 桥。`panel/`
+分类器;`lib/config-remote.js` 构造 `extraproAnchorConfig` Typert Remote 桥。`panel/`
 是面板伴随行(空宿主半边 + `panel/client.js` 浏览器 bundle)。`preset/lib/` 是构建
 快照——改动 `lib/` 后运行 `scripts/build-preset.sh`。
 
@@ -294,6 +326,19 @@ npm test
 `modeltest/evaluator/trigger_probe` 的 `classifyReasoning`)给每个会话打分排序,
 输出最优一轮的首个 reasoning 块、用户消息与工具调用,可直接填入
 `virtualUserTemplate`/`virtualReasoningTemplate`。需要 `unzstd` CLI。
+
+## 引用与致谢
+
+- [`xiaobright/dsh-anchored-standard`](https://github.com/xiaobright/dsh-anchored-standard) —
+  本插件所推广的原「两工具 → 全量目录」锚定机制及其轨迹证据来源;
+- [`xiaobright/modeltest`](https://github.com/xiaobright/modeltest) —
+  trigger-probe 实验、`We need` / `Let me` 指纹分类器(`lib/health.js` 逐字复用)
+  与 V4.1 轨迹表;
+- [`OoWJZZoO/dsh-read-image`](https://github.com/OoWJZZoO/dsh-read-image) —
+  fail-safe 环境自检模式(`lib/guards.js`)、可选 Typert Remote 配置桥模式与客户端
+  守卫模式;
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 及其
+  Standard/Minimal agent preset — 宿主平台与本插件所叠加的 preset 表面。
 
 ## 许可证
 
