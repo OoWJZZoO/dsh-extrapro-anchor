@@ -52,27 +52,40 @@
 ### 一致性保证
 
 guide 文件在事件注入**之前**真实写盘(`<cwd>/.dsh/<sessionId>/agent-dev-guide.md`),
-内容 = elevation 句 + preset 真实提示词;虚拟 `tool/result` 用与 `read` 工具相同的
-`<path>/<type>/<content>` 行号渲染。模型若之后真的去读该文件,得到与历史完全相同的
-文本——转录与磁盘互相印证,不会困惑。
+内容 = elevation 句 + preset 真实提示词 + **全量工具目录文本**;虚拟 `tool/result` 用
+`pwd && cat` 的真实 stdout 渲染(`<cwd>\n<内容>`,minimal 面只有 bash,没有 read
+工具)。模型若之后真的去读该文件,得到与历史完全相同的文本——转录与磁盘互相印证,
+不会困惑。
+
+### 系统提示词替换(全局、幂等)
+
+无论组合挂的是什么普通 preset,插件在每次 `system-prompt/assemble` 中把返回的
+`sections` 替换为两段:minimal persona 一句 + 两工具声明(仅 bash、
+str_replace_editor)。**工具 schemas 从不过滤**——`assembly.tools` 原样保留,首请求
+即全量目录;完整工具清单以文本形式渲染进 guide(`buildToolCatalogText`),由虚拟轮的
+result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化的 `request/header`
+保持在 minimal system(请求缓存友好);elevation 捕获在替换**之前**完成(seed 先跑)。
 
 ### 幂等与范围
 
 - `isFreshTopLevelAgent`:仅顶层(`delegationDepth === 0`)且尚无 `user/message` 的
   会话;种子事件本身是 `user/message`,因此重复组装、resume、reload 天然幂等;
 - 进程内再加 `WeakSet<session>` 双保险;
-- 子 agent 永不注入(用户决策:只顶层)。
+- 子 agent 永不注入(用户决策:只顶层);非顶层、非 fresh 的组装不改动 system。
 
 ## 设计决策记录
 
-1. **首请求即全量目录**(用户确认):虚拟轮承担锚定,不需要两工具 bootstrap,也没有
-   "纯文字首答困死在 bootstrap"的问题。代价:与已验证配方的"首轮两工具"不同,需实测。
+1. **system 由插件自己替换为 minimal(用户决策,2026-08-15 修正)**:目的不是"要求
+   preset 配 minimal",而是**在任意普通 preset 上注入 minimal 提示词 + 虚拟对话,再
+   重注入真实普通 preset 提示词**,同时继承优质思维链与多工具能力。工具 schemas
+   始终全量;首请求模型"以为"只有两工具(minimal system 声明),虚拟轮 result 揭示
+   全量清单后自然调用。
 2. **只顶层注入**(用户确认):spawn 子 agent 直接全量目录,不锚定。
 3. **UI 如实呈现并标记**(用户确认):虚拟消息 source 均为 `{kind: 'plugin'}`,
    导出 JSONL 可审计。
 4. **注入点选 `system-prompt/assemble` 而非 `agent/inbox/inserted`**:前者能自动捕获
    preset 真实提示词(elevation 内容),且注入顺序严格早于 `deriveMessages`;后者只能
-   用配置文本。
+   用配置文本;且 waterfall 的返回值权威,可同时改写 system 与保留 tools。
 5. **去重 harness 自带的 `dsh-agent-instructions`(dsh-base 依赖)**:插件自己注入
     AGENTS.md/CLAUDE.md(顺序与用户描述一致);harness 内置的 agent-instructions
     会在 `agent/pre-step` 里把 AGENTS.md 再次插入到**真实用户消息之后**(2026-08-15

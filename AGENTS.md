@@ -59,10 +59,17 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    `assistant/message` arrive as an "update" before the real `step/start`
    ("received an update before its start Match") and broke the trajectory
    render. Turn 0 is the UI's prologue bucket, merged ahead of turn 1.
-6. **Minimal persona is the anchoring premise.** The composition must keep the
-   persona as the minimal native prompt with `complete: true` and
-   `includeRuntimeContext: false`; the preset's own guidance belongs in the
-   elevation (guide file), not the system prompt.
+6. **The plugin replaces the system prompt itself — no preset precondition.**
+   On every `system-prompt/assemble` of a top-level session, the returned
+   `assembly.sections` are replaced with the minimal persona sentence (byte-
+   identical to the harness minimal preset) plus a two-tool statement listing
+   only `bash` and `str_replace_editor`. The tool SCHEMAS are never filtered —
+   the request always carries the full catalog; the full catalog is revealed
+   as TEXT inside the guide file (rendered via `buildToolCatalogText`), so the
+   virtual turn's result is what tells the model the real capability set. The
+   replacement is idempotent and global: re-applied on every assemble so the
+   persisted request/header stays minimal (request-cache friendly). Elevation
+   capture must read the sections BEFORE the replacement (seed runs first).
 7. **The harness's own workspace-instructions injection is deduped.** The
    harness bundles `@deepseek-ai/dsh-agent-instructions` (a dsh-base
    dependency) which composes AGENTS.md/CLAUDE.md into `agent/pre-step`

@@ -455,3 +455,61 @@ test('virtual templates default to the pre-sampled minimal texts', async () => {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+test('system sections are replaced with minimal persona + two-tool statement', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    const agent = makeAgent({ session })
+    const assembly = makeAssembly()
+    assembly.tools = [
+      { name: 'bash', description: 'Run commands', parameters: { type: 'object' } },
+      { name: 'read', description: 'Read a file', parameters: { type: 'object' } },
+      { name: 'edit', description: 'Edit a file', parameters: { type: 'object' } },
+    ]
+    const result = await runSeed({ ctx, state, agent, assembly })
+    // Global replacement: the returned assembly's sections are the minimal ones
+    assert.equal(result.sections.length, 2)
+    assert.equal(result.sections[0].name, 'persona')
+    assert.equal(result.sections[0].text, 'You are a helpful software engineer assistant.')
+    assert.equal(result.sections[1].name, 'tools')
+    assert.match(result.sections[1].text, /bash, str_replace_editor/)
+    assert.doesNotMatch(result.sections[1].text, /\bread\b|\bedit\b/) // two-tool statement only
+    // Tools schemas are NOT filtered — full catalog stays
+    assert.equal(result.tools.length, 3)
+    // Idempotent: a second assembly applies the same replacement
+    const result2 = await runSeed({ ctx, state, agent, assembly })
+    assert.deepEqual(result2.sections.map((s) => s.text), result.sections.map((s) => s.text))
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('guide content includes the full tool catalog text', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    const agent = makeAgent({ session })
+    const assembly = makeAssembly()
+    assembly.tools = [
+      { name: 'bash', description: 'Run commands in a shell' },
+      { name: 'web_search', description: 'Search the web' },
+      { name: 'subagent', description: 'Delegate work' },
+    ]
+    await runSeed({ ctx, state, agent, assembly })
+    const resultText = session.events.find((e) => e.type === 'tool/result').data.message.content[0].content[0].text
+    assert.match(resultText, /The full tool catalog available in this session:/)
+    assert.match(resultText, /- bash: Run commands in a shell/)
+    assert.match(resultText, /- web_search: Search the web/)
+    assert.match(resultText, /- subagent: Delegate work/)
+    // The elevation (non-persona sections) is still captured BEFORE the catalog
+    assert.match(resultText, /Work in a calm, direct style\./)
+    assert.match(resultText, /Model is deepseek-v4-pro in \/work\./)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})

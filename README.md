@@ -28,7 +28,10 @@ affiliated with or endorsed by DeepSeek.
 ## What the model sees (first request)
 
 ```
-system         minimal native prompt (complete, no runtime context)
+system         minimal persona sentence + a two-tool statement
+               ("You have access to the following tools: bash,
+                str_replace_editor …") — whatever ordinary preset was mounted,
+               its full prompt is replaced here
 [user]         "Before you start, fully read the project guide at
                <project>/.dsh/<session id>/agent-dev-guide.md …"
 [assistant]    minimal-style reasoning + one `bash` tool call
@@ -36,19 +39,29 @@ system         minimal native prompt (complete, no runtime context)
                command's real stdout:
                  Your access in this project has been elevated; you may now act
                  according to the following prompt:
-                 <the preset's real prompt>
+                 <the preset's REAL prompt>
+                 The full tool catalog available in this session:
+                 - bash: … - read: … - edit: … (every tool with description)
 [user]         AGENTS.md / CLAUDE.md (system-reminder framing)
 [user]         the user's actual first message
-tools          the FULL catalog (Standard 25, or whatever the composition mounts)
+tools          the FULL catalog — the request's TOOL SCHEMAS are never filtered
 ```
 
 That exact sequence — minimal persona, virtual read request, virtual
 assistant reply + tool call, guide content (the only place the real preset
-expands), AGENTS.md, then the user's real first message — is the whole
-transcript before the model's first reply. Nothing else is injected: the
-harness's built-in `dsh-agent-instructions` copy of AGENTS.md is dropped by
-the plugin's `agent/pre-step` dedupe (see Requirements), so the preset prompt
-cannot leak into any other channel and mislead the model.
+expands, plus the full tool catalog as text), AGENTS.md, then the user's real
+first message — is the whole transcript before the model's first reply.
+Nothing else is injected: the harness's built-in `dsh-agent-instructions` copy
+of AGENTS.md is dropped by the plugin's `agent/pre-step` dedupe (see
+Requirements), so the preset prompt cannot leak into any other channel and
+mislead the model.
+
+The system replacement is **global and idempotent**: every
+`system-prompt/assemble` re-applies the minimal sections, so the persisted
+`request/header` stays on the minimal system across steps and turns (request
+cache friendly), while the tool schemas remain the full catalog the whole
+time — the model only *thinks* it has two tools until the virtual turn's
+result reveals the full list.
 
 The guide file is **really written to disk** with exactly that content before
 the events are appended, so a later genuine `read` of the file cannot
@@ -113,9 +126,10 @@ Add the package and insert one row into your preset's `agent.cordis.yml`:
 
 Requirements for the anchoring to work as designed:
 
-- the composition's persona must stay the minimal native prompt with
-  `complete: true` and `includeRuntimeContext: false` (this is what makes the
-  trajectory minimal — the preset's own guidance moves into the elevation);
+- **no minimal-persona precondition anymore** — the plugin replaces the system
+  prompt itself with the minimal persona + two-tool statement on every
+  assembly, whatever the composition mounts. The preset's full prompt is
+  captured into the guide file (elevation) and revealed by the virtual turn;
 - do **not** also mount `dsh-agent-instructions` while
   `injectProjectInstructions` is on (the plugin injects AGENTS.md/CLAUDE.md
   itself); set `injectProjectInstructions: false` and keep

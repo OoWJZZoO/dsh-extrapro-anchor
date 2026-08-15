@@ -21,23 +21,33 @@
 ## 模型在首个请求看到的上下文(按序)
 
 ```
-system         minimal 原生提示词(complete,无 runtime context)
+system         minimal persona 一句 + 两工具声明
+               ("You have access to the following tools: bash,
+                str_replace_editor …")——无论挂的是哪个普通 preset,其完整提示词
+               在这里被插件替换掉
 [user]         "开始前请完整读取项目根目录下的 <项目>/.dsh/<session id>/agent-dev-guide.md …"
 [assistant]    minimal 风格 reasoning + 一次 bash 工具调用
 [tool result]  与该 bash 命令真实 stdout 完全一致的渲染:
                  Your access in this project has been elevated; you may now act
                  according to the following prompt:
                  <该 preset 的真实提示词>
+                 The full tool catalog available in this session:
+                 - bash: … - read: … - edit: …(每个工具名 + 描述)
 [user]         AGENTS.md / CLAUDE.md(system-reminder 框架)
 [user]         用户真实首条消息
-tools          完整目录(Standard 25 项,或组合挂载的任何工具)
+tools          完整目录——请求里的工具 SCHEMAS 从不被过滤
 ```
 
 模型首次回复之前,转录严格就是这一序列:minimal persona → 虚拟读文件请求 →
-虚拟 assistant 回应 + 工具调用 → guide 内容(preset 真实提示词唯一展开的位置)→
-AGENTS.md → 用户真实首条消息。除此之外不注入任何东西:harness 内置
-`dsh-agent-instructions` 注入的 AGENTS.md 副本会被插件的 `agent/pre-step` 去重丢弃,
-preset 提示词不会泄漏到任何其他通道误导模型。
+虚拟 assistant 回应 + 工具调用 → guide 内容(preset 真实提示词唯一展开的位置,外加
+全量工具目录文本)→ AGENTS.md → 用户真实首条消息。除此之外不注入任何东西:harness
+内置 `dsh-agent-instructions` 注入的 AGENTS.md 副本会被插件的 `agent/pre-step` 去重
+丢弃,preset 提示词不会泄漏到任何其他通道误导模型。
+
+系统替换是**全局且幂等**的:每次 `system-prompt/assemble` 都重新应用 minimal 段,
+持久化的 `request/header` 在后续 step/turn 一直保持 minimal(请求缓存友好);工具
+schemas 全程是全量目录——模型只是"以为"只有两个工具,直到虚拟轮的 result 揭示完整
+清单。
 
 guide 文件会在事件注入前**真实写盘**,内容与虚拟结果逐字一致,后续模型若真的去读该
 文件不会发现矛盾。
@@ -90,9 +100,9 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
 
 锚定按设计生效的前提:
 
-- 组合的 persona 保持 minimal 原生提示词,`complete: true` 且
-  `includeRuntimeContext: false`(这是轨迹走 minimal 的原因;preset 自身指引进入
-  elevation);
+- **不再要求组合自带 minimal persona**:插件自己会在每次组装时把 system 提示词替换为
+  minimal persona + 两工具声明,不管挂的是什么 preset;preset 的完整提示词被捕获进
+  guide 文件(elevation),由虚拟轮揭示;
 - `injectProjectInstructions` 开启时**不要**同时挂载 `dsh-agent-instructions`(插件
   自己注入 AGENTS.md/CLAUDE.md);若想保留其文件变更增量更新,则设
   `injectProjectInstructions: false` 并保留 agent-instructions。

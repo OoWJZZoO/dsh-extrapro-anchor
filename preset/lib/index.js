@@ -1,23 +1,34 @@
 /**
  * anchor-seed — deterministic trajectory anchoring for DeepSeek Harness.
  *
- * Goal: reproduce the anchored-standard effect WITHOUT depending on the model
- * ever calling a real tool. Before the first model request of a top-level
- * session, this plugin appends one pre-sampled virtual turn to the session
- * log:
+ * Goal: in ANY ordinary preset, make the first model request run inside the
+ * minimal trajectory (superior reasoning chain) while keeping the full tool
+ * catalog usable afterwards (multi-tool capability). The plugin does this in
+ * three moves, none of which depends on the model calling a real tool:
  *
- *   1. system           minimal native prompt (complete, no runtime context)
- *   2. [virtual] user   asks the agent to fully read .dsh/<id>/agent-dev-guide.md
- *   3. [virtual] asst   pre-sampled minimal-style reasoning + one `bash` tool
- *                       call (`pwd && cat <guide>` — the minimal preset's real
- *                       surface; there is no `read` tool there)
- *   4. [virtual] result the command's raw stdout: "<cwd>\n<guide content>",
- *                       where the guide content is "Your access in this
- *                       project has been elevated; you may now act according
- *                       to the following prompt:" + the preset's real prompt
- *   5. [injected] user  AGENTS.md / CLAUDE.md (system-reminder framing)
- *   6. [real] user      the user's actual first message, with the FULL tool
- *                       catalog already exposed
+ *   0. REPLACE the system prompt (every `system-prompt/assemble`, global and
+ *      idempotent): whatever the composition mounted, the returned sections
+ *      become the minimal persona sentence (byte-identical to the harness
+ *      minimal preset) plus a two-tool statement ("You have access to the
+ *      following tools: bash, str_replace_editor …"). The request's TOOL
+ *      SCHEMAS stay FULL — never filtered.
+ *   1. SEED one virtual turn into the session log before the first request:
+ *      [virtual] user asks the agent to fully read .dsh/<id>/agent-dev-guide.md
+ *      [virtual] asst pre-sampled minimal-style reasoning + one `bash` tool
+ *                call (`pwd && cat <guide>` — the minimal preset's real
+ *                surface; there is no `read` tool there)
+ *      [virtual] result the command's raw stdout: "<cwd>\n<guide content>",
+ *                where the guide content is "Your access in this project has
+ *                been elevated; you may now act according to the following
+ *                prompt:" + the preset's REAL prompt + the full tool catalog
+ *                rendered as text (every tool name + description).
+ *   2. [injected] user  AGENTS.md / CLAUDE.md (system-reminder framing)
+ *   3. [real] user      the user's actual first message.
+ *
+ * Net effect: the model believes it has two tools (minimal system statement),
+ * opens with "We need …", then the virtual turn's result reveals the full
+ * catalog as text — it learns the real capability set and freely calls any
+ * tool, while the request schemas were full the whole time (cache friendly).
  *
  * The guide file is REALLY written to disk first (content identical to the
  * virtual result), so a later real read of the file cannot contradict the
@@ -30,9 +41,11 @@
  * `1:1` assistant-step lifecycle.
  *
  * Seeding happens inside the `system-prompt/assemble` waterfall of the first
- * step — after `next()` resolves, the full (pre-complete-wipe) section list is
- * available for the elevation auto-capture, and the appended events are
- * already in the log before `buildRequest` calls `session.deriveMessages()`.
+ * step — after `next()` resolves, the full section list is available for the
+ * elevation auto-capture and the tool-catalog text, and the appended events
+ * are already in the log before `buildRequest` calls
+ * `session.deriveMessages()`. The section replacement happens AFTER seeding so
+ * the guide captures the composition's REAL prompt, not the minimal one.
  *
  * The harness bundles its own workspace-instruction injection
  * (`@deepseek-ai/dsh-agent-instructions`, a dsh-base dependency): it composes
@@ -59,6 +72,8 @@ import {
   buildVirtualTurn,
   appendVirtualTurn,
   buildBashReadResult,
+  buildMinimalSections,
+  buildToolCatalogText,
   createInstructionsMessage,
   guideAbsolutePath,
   guideRelativePath,
@@ -206,15 +221,22 @@ export function apply(ctx, config) {
     // sampled minimal round: "…entire .dsh/<id>/agent-dev-guide.md in the
     // project root directory…"); the file is written at the absolute path.
     const displayPath = guideRelativePath(session.id)
+    // The guide carries the composition's REAL prompt (captured before the
+    // system sections are replaced below) PLUS the full tool catalog rendered
+    // as text: after the virtual read the model sees every tool it may
+    // actually call, even though the first request's system prompt described
+    // only the two minimal tools.
+    const toolCatalog = buildToolCatalogText(assembled?.tools)
     const guideContent = buildGuideContent({
       notice: cfg.elevationNotice,
       prompt: captureElevation(assembled, cfg),
     })
+    const fullGuideContent = toolCatalog.length > 0 ? `${guideContent}\n\n${toolCatalog}` : guideContent
 
     // 1) The REAL file must exist before the virtual turn references it, so a
     //    later genuine read returns the identical content.
     await mkdir(dirname(guidePath), { recursive: true })
-    await writeFile(guidePath, guideContent, 'utf8')
+    await writeFile(guidePath, fullGuideContent, 'utf8')
 
     // 2) AGENTS.md / CLAUDE.md, rendered as the next user message (the
     //    "再然后才是注入的 AGENTS.md / CLAUDE.md" step). Disable with
@@ -241,7 +263,7 @@ export function apply(ctx, config) {
     const command = interpolatePath(cfg.virtualCommandTemplate, displayPath)
     events.unshift(...buildVirtualTurn({
       command,
-      resultText: buildBashReadResult(cwd, guideContent),
+      resultText: buildBashReadResult(cwd, fullGuideContent),
       userText: interpolatePath(cfg.virtualUserTemplate, displayPath),
       reasoningText: interpolatePath(cfg.virtualReasoningTemplate, displayPath),
       toolName: cfg.virtualToolName,
@@ -282,20 +304,43 @@ export function apply(ctx, config) {
     }
   }, { prepend: true })
 
-  // ── seed at the first prompt assembly of a fresh top-level session ──
+  // ── replace the system prompt with the minimal persona + two-tool statement,
+  //    and seed the virtual turn on the first assembly of a fresh top-level session
+  //
+  // The anchor's core move: whatever ordinary preset the composition mounts, the
+  // model's FIRST request must see the minimal system-prompt condition (persona
+  // sentence + a tool-catalog statement listing only bash/str_replace_editor),
+  // so it opens inside the minimal trajectory ("We need …"), while the request's
+  // TOOL SCHEMAS stay FULL (28 tools — never filtered). The guide file written
+  // here carries the composition's REAL prompt plus the full tool catalog as
+  // text; the virtual turn's bash result reveals it, and the model then freely
+  // calls the full catalog. The section replacement is GLOBAL and idempotent:
+  // every assemble() (every step/turn) re-applies it, so the persisted
+  // request/header stays on the minimal system for request-cache stability.
   ctx.on('system-prompt/assemble', async (assembly, context, next) => {
     // Downstream errors propagate untouched; only this plugin's logic is guarded.
     const assembled = await next()
     const agent = context?.agent
     try {
-      if (!agent || seeded.has(agent) || !isFreshTopLevelAgent(agent)) return assembled
-      await seed(agent, assembled)
+      if (!agent) return assembled
+      const fresh = isFreshTopLevelAgent(agent)
+      const alreadySeeded = seeded.has(agent)
+      if (!fresh && !alreadySeeded) return assembled // subagents / non-fresh: untouched
+      if (fresh && !alreadySeeded) {
+        // First assembly of a fresh top-level session: capture the REAL prompt
+        // (still full at this point) into the guide and append the virtual turn.
+        await seed(agent, assembled)
+      }
+      // Global replacement: minimal persona + two-tool statement. Tools schemas
+      // are left intact — the full catalog is revealed by the guide text.
+      assembled.sections = buildMinimalSections()
+      return assembled
     } catch (error) {
       warnOnce(
         `${name}: anchor seeding failed for session "${agent?.session?.id ?? '?'}", ` +
         `session continues without the anchor: ${String((error && error.message) || error)}`,
       )
+      return assembled
     }
-    return assembled
   })
 }
