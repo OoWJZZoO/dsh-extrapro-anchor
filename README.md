@@ -97,6 +97,50 @@ first request's structure (modeltest trigger experiments, 2026-08-14):
 `anchor-seed` itself is new — validate the trajectory fingerprint on your
 setup before relying on it (see Verify).
 
+## Modeltest validation (2026-08-15)
+
+One run per configuration on the frozen Project2 V4.1b evaluation: WSL2, DeepSeek
+V4 Pro (official API), reasoning `max`, no MCP, no dsh-read-image, DSH 0.1.0-rc.6.
+
+| Configuration | Ability | hidden | ESP static | real build |
+|---|---:|---:|---:|---|
+| minimal native (no anchor) | **97** | 43/45 | 9/9 | passed (model-driven) |
+| standard + anchor-seed | **96** | 44/45 | 9/9 | failed (compile) |
+| code (PTC) + anchor-seed | **88** | 42/45 | 8/9 | failed (configure) |
+
+Versus the author's no-anchor baselines (same model, `max`, WSL, official API):
+
+| Config | no anchor (author) | + anchor-seed (this run) | Δ |
+|---|---:|---:|---:|
+| minimal | 99/96 (2-tool wire) | 97 (25-tool wire, harness diff) | n/a\* |
+| standard | 91 | **96** | **+5** |
+| PTC (code) | 92 | 88 | **−4** |
+
+\* This harness's base layer registers the global tool catalog, so the native
+minimal request carries 25 tool schemas instead of the two the author's harness
+sent — the 97 here is the current-harness native baseline, not the 2-tool RL
+surface; the author's 99/96 is on the older harness and is not directly comparable.
+
+Findings:
+
+- **anchor-seed works on standard.** The virtual turn pulls the first request into
+  the minimal trajectory ("We need" opening, zero "Let me"), and the hidden run
+  reproduces the exact anchored-standard fingerprint — 44/45, missing only the
+  same F12-04 semantic string both anchored-standard runs missed. 96 vs the
+  author's no-anchor standard 91; with a passing firmware build the frozen scorer
+  would give 99 (the 96↔97 gap to native minimal is purely the F9 build evidence:
+  run 2's firmware had a real compile error — a stale `MQTT_EVENT` base from the
+  pre-v6.0 esp-mqtt API — honestly recorded in its PR).
+- **PTC is not a good fit for anchor.** 88 is below the author's no-anchor PTC
+  baseline (92). The virtual turn is a bash/read-style transcript while the PTC
+  wire surface exposes only `run_code`, so the model must reconcile history it
+  cannot reproduce with its single entry point, and the code-writing overhead
+  diverts reasoning budget from the task (ambient session policy and the ESP
+  mqtt dependency were missed).
+- n=1 each — provisional. F9: the frozen build runner is Windows-PowerShell-only;
+  run 1's F9=6/6 uses the model's own real in-session build evidence (stdpro.bin
+  archived with hash), runs 2/3 keep the frozen 3/6 partial.
+
 ## Installation
 
 ### As a self-contained preset (recommended, like anchored-standard)

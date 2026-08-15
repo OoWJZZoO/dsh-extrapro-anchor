@@ -78,6 +78,45 @@ DeepSeek V4 Pro 会强烈依赖首轮 API 可见工具目录与请求结构(mode
 **声明边界:** 机制与已发布证据一致,但本插件本身是新的——上线前请先验证轨迹指纹
 (见"验证加载")。
 
+## 实测对照(2026-08-15)
+
+冻结的 Project2 V4.1b 评测,每组一次:WSL2、DeepSeek V4 Pro(官方 API)、reasoning
+`max`、无 MCP、无 dsh-read-image、DSH 0.1.0-rc.6。
+
+| 配置 | Ability | hidden | ESP static | 真实构建 |
+|---|---:|---:|---:|---|
+| minimal 原生(无 anchor) | **97** | 43/45 | 9/9 | 通过(模型会话内自驱动) |
+| standard + anchor-seed | **96** | 44/45 | 9/9 | 失败(编译错误) |
+| code(PTC)+ anchor-seed | **88** | 42/45 | 8/9 | 失败(configure 阶段) |
+
+对照原作者无 anchor 基线(同模型、`max`、WSL、官方 API):
+
+| 配置 | 无 anchor(原作者) | + anchor-seed(本次) | Δ |
+|---|---:|---:|---:|
+| minimal | 99/96(2 工具 wire) | 97(25 工具 wire,harness 版本差异) | 不可直接比\* |
+| standard | 91 | **96** | **+5** |
+| PTC(code) | 92 | 88 | **−4** |
+
+\* 本 harness 的 base 层注册了全局工具目录,minimal 原生首请求 wire 为 25 个工具
+schema(原作者的 harness 只发 2 个工具),因此本机 minimal 原生 97 是当前 harness 的
+原生基线,与原作者 2 工具 RL 面的 99/96 不可直接比较。
+
+要点:
+
+- **anchor 在 standard 上验证有效。** 虚拟轮把首请求拉进 minimal 轨迹("We need" 开头、
+  "Let me" 归零),hidden 复现了 anchored-standard 的精确指纹——44/45,唯一 miss 与
+  anchored-standard 两跑相同(F12-04 语义串)。96 vs 原作者无 anchor 的 standard 91;
+  若固件编译通过,按冻结评分器应为 99(96 与 minimal 原生 97 的差距纯粹来自 F9 构建
+  证据:run2 固件有一处真实编译错误——沿用了 v6.0 之前 esp-mqtt 的 `MQTT_EVENT` base
+  宏,模型已在 PR 中如实记录)。
+- **PTC 不适合 anchor。** 88 低于原作者无 anchor 的 PTC 基线(92)。虚拟轮是 bash/read
+  风格转录,而 PTC 的 wire 面只有 `run_code` 一个入口,模型要调和"历史里用过的工具在
+  当前面不可复现"的矛盾,且写程序的间接开销挤占了推理预算(ambient 会话权限与 ESP
+  mqtt 依赖声明双双失守)。
+- 每组 n=1,均为 provisional。F9:冻结的构建 runner 仅支持 Windows-PowerShell;run1
+  的 F9=6/6 使用模型会话内真实成功构建的证据(stdpro.bin 已归档并附哈希),run2/run3
+  维持冻结的 3/6 部分分。
+
 ## 安装
 
 ### 方式一:自包含 preset(推荐,同 anchored-standard)
