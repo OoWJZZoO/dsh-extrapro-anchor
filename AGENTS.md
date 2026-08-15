@@ -73,16 +73,15 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    replacement is idempotent and global: re-applied on every assemble so the
    persisted request/header stays minimal (request-cache friendly). Elevation
    capture must read the sections BEFORE the replacement (seed runs first).
-7. **The harness's own workspace-instructions injection is deduped.** The
-   harness bundles `@deepseek-ai/dsh-agent-instructions` (a dsh-base
-   dependency) which composes AGENTS.md/CLAUDE.md into `agent/pre-step`
-   decisions AFTER the claimed user messages — that would place a second
-   instructions message after the user's real first message. anchor-seed
-   registers `agent/pre-step` with `prepend: true` and drops
-   `source.kind === 'agent-instructions'` messages once the seed injected
-   instructions, so exactly one instructions message remains, between the
-   virtual turn and the real request. Do not also mount a separate copy of
-   `dsh-agent-instructions` (double injection).
+7. **Workspace instructions are the harness's job — the plugin does not
+   inject AGENTS.md/CLAUDE.md.** The harness bundles
+   `@deepseek-ai/dsh-agent-instructions` (a dsh-base dependency) which
+   composes AGENTS.md/CLAUDE.md into `agent/pre-step` decisions AFTER the
+   claimed real user messages. That matches the standard convention the user
+   asked for (2026-08-15): virtual turn → user's real first message →
+   AGENTS.md. anchor-seed never appends an instructions message itself and
+   registers no `agent/pre-step` listener. `injectProjectInstructions` /
+   `maxInstructionsBytes` are accepted for backward compatibility but inert.
 
 ## Working on the elevation / virtual dialogue
 
@@ -94,9 +93,10 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   preset), selected by `scripts/find-best-sampling-round.mjs`; the path is
   generalized to the `{path}` placeholder (project-root-relative). It is an
   n=1 sample — when you swap in your own sample, document its source round.
-- `injectProjectInstructions` (default on) injects AGENTS.md/CLAUDE.md from the
-  session cwd right after the elevation. Do NOT also mount
-  `dsh-agent-instructions` while it is on (double injection).
+- The virtual user text is "Please read the entire {path} …" (no "Session
+  setup:" prefix, no "Do not reply yet" trailer — 2026-08-15 user request) and
+  carries `source.kind: 'user'` so the trajectory renders it as a real user
+  message.
 
 ## Verification workflow
 

@@ -32,8 +32,10 @@ system         minimal persona sentence + a two-tool statement
                ("You have access to the following tools: bash,
                 str_replace_editor …") — whatever ordinary preset was mounted,
                its full prompt is replaced here
-[user]         "Before you start, fully read the project guide at
-               <project>/.dsh/<session id>/agent-dev-guide.md …"
+[user]         "Please read the entire
+               <project>/.dsh/<session id>/agent-dev-guide.md in the project
+               root directory for detailed information, and work entirely
+               according to the instructions it contains."
 [assistant]    minimal-style reasoning + one `bash` tool call
 [tool result]  the guide's full content, rendered exactly like that bash
                command's real stdout:
@@ -42,19 +44,21 @@ system         minimal persona sentence + a two-tool statement
                  <the preset's REAL prompt>
                  The full tool catalog available in this session:
                  - bash: … - read: … - edit: … (every tool with description)
-[user]         AGENTS.md / CLAUDE.md (system-reminder framing)
 [user]         the user's actual first message
+[user]         AGENTS.md / CLAUDE.md (system-reminder framing — injected by the
+               harness's OWN dsh-agent-instructions, AFTER the real message)
 tools          the FULL catalog — the request's TOOL SCHEMAS are never filtered
 ```
 
 That exact sequence — minimal persona, virtual read request, virtual
 assistant reply + tool call, guide content (the only place the real preset
-expands, plus the full tool catalog as text), AGENTS.md, then the user's real
-first message — is the whole transcript before the model's first reply.
-Nothing else is injected: the harness's built-in `dsh-agent-instructions` copy
-of AGENTS.md is dropped by the plugin's `agent/pre-step` dedupe (see
-Requirements), so the preset prompt cannot leak into any other channel and
-mislead the model.
+expands, plus the full tool catalog as text), the user's real first message,
+then AGENTS.md (harness convention) — is the whole transcript before the
+model's first reply. The plugin never injects workspace instructions itself:
+the harness's built-in `dsh-agent-instructions` (a dsh-base dependency) places
+AGENTS.md/CLAUDE.md after the real user message, matching the standard
+convention. Nothing else is injected, so the preset prompt cannot leak into
+any other channel and mislead the model.
 
 The system replacement is **global and idempotent**: every
 `system-prompt/assemble` re-applies the minimal sections, so the persisted
@@ -130,16 +134,12 @@ Requirements for the anchoring to work as designed:
   prompt itself with the minimal persona + two-tool statement on every
   assembly, whatever the composition mounts. The preset's full prompt is
   captured into the guide file (elevation) and revealed by the virtual turn;
-- do **not** also mount `dsh-agent-instructions` while
-  `injectProjectInstructions` is on (the plugin injects AGENTS.md/CLAUDE.md
-  itself); set `injectProjectInstructions: false` and keep
-  `agent-instructions` if you want its incremental file-touch updates instead.
-  Note that the harness bundles `dsh-agent-instructions` as a dsh-base
-  dependency: anchor-seed now dedupes that built-in injection automatically —
-  once the seed has injected instructions, it drops the harness's
-  `agent-instructions` copy from each `agent/pre-step` decision, so the
-  transcript shows exactly one instructions message, between the virtual turn
-  and the user's real first message (no second AGENTS.md after it).
+- **workspace instructions (AGENTS.md/CLAUDE.md) come from the harness**, not
+  the plugin: the harness bundles `dsh-agent-instructions` as a dsh-base
+  dependency, which composes them AFTER the user's real first message
+  (standard convention). anchor-seed does not inject instructions itself and
+  needs no dedupe. `injectProjectInstructions` / `maxInstructionsBytes` config
+  keys are accepted for backward compatibility but inert.
 
 ## Configuration (composition row `config`)
 
@@ -153,8 +153,8 @@ Requirements for the anchoring to work as designed:
 | `virtualReasoningTemplate` | pre-sampled (see `lib/runtime.js`) | Virtual assistant reasoning text; default is the verbatim minimal "We need" first block from the same round. |
 | `virtualToolName` | `bash` | Tool the virtual assistant calls (the minimal preset's real surface is `bash` + `str_replace_editor` — there is no `read` tool). |
 | `virtualCommandTemplate` | `pwd && cat {path}` | Bash command whose fabricated stdout becomes the tool result. |
-| `injectProjectInstructions` | `true` | Read AGENTS.md/CLAUDE.md from the session cwd and inject them right after the elevation. |
-| `maxInstructionsBytes` | `65536` | Byte budget for the injected instructions text. |
+| `injectProjectInstructions` | `true` | **Inert (backward compat).** Workspace instructions come from the harness's `dsh-agent-instructions` after the user's real first message. |
+| `maxInstructionsBytes` | `65536` | **Inert (backward compat).** See `injectProjectInstructions`. |
 | `guard.enabled` | `true` | Environment self-check switch; `false` force-loads the plugin. |
 
 ## Verify

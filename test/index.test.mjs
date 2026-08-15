@@ -62,16 +62,6 @@ async function runSeed({ ctx, state, agent, assembly = makeAssembly() }) {
   return listener(assembly, { agent }, async () => assembly)
 }
 
-/** Run the registered agent/pre-step listeners as a waterfall (registration order). */
-async function runPreStep({ ctx, state, payload, initial }) {
-  const listeners = (state.listeners.get('agent/pre-step') ?? []).map((entry) => entry.callback)
-  let decision = initial
-  for (const callback of listeners) {
-    decision = await callback(payload, async () => decision)
-  }
-  return decision
-}
-
 test('exports a diagnostic plugin name', () => {
   assert.equal(name, 'anchor-seed')
 })
@@ -153,7 +143,7 @@ test('elevationSource none emits the notice only', async () => {
   }
 })
 
-test('AGENTS.md/CLAUDE.md are injected right after the virtual turn', async () => {
+test('AGENTS.md/CLAUDE.md are NOT injected by the plugin (harness owns them)', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
@@ -162,18 +152,17 @@ test('AGENTS.md/CLAUDE.md are injected right after the virtual turn', async () =
     apply(ctx, {})
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    // The seed appends only the virtual turn: no extra instructions message.
+    // AGENTS.md/CLAUDE.md are injected by the harness's own
+    // dsh-agent-instructions AFTER the real user message (standard convention).
     const types = session.events.map((e) => e.type)
-    assert.deepEqual(types, ['user/message', 'assistant/message', 'tool/call', 'tool/result', 'user/message'])
-    const injected = session.events.at(-1)
-    assert.equal(injected.data.source.plugin, 'anchor-seed')
-    assert.match(injected.data.content[0].text, /project rules/)
-    assert.match(injected.data.content[0].text, /claude rules/)
+    assert.deepEqual(types, ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
 
-test('injectProjectInstructions false skips AGENTS.md injection', async () => {
+test('injectProjectInstructions is inert (accepted for backward compatibility)', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
@@ -182,6 +171,12 @@ test('injectProjectInstructions false skips AGENTS.md injection', async () => {
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     assert.deepEqual(session.events.map((e) => e.type), ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
+    // true behaves identically — the plugin never injects instructions itself
+    const { ctx: ctx2, state: state2 } = makeCtx({ cwd })
+    apply(ctx2, { injectProjectInstructions: true })
+    const session2 = makeSession({ cwd })
+    await runSeed({ ctx: ctx2, state: state2, agent: makeAgent({ session: session2 }) })
+    assert.deepEqual(session2.events.map((e) => e.type), ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -213,94 +208,6 @@ test('virtual turn events carry turn 1 step 0 (no collision with the real first 
     rmSync(cwd, { recursive: true, force: true })
   }
 })
-
-test('agent/pre-step drops the harness agent-instructions copy after the seed injected instructions', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
-  try {
-    writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
-    const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {})
-    const session = makeSession({ cwd })
-    const agent = makeAgent({ session })
-    await runSeed({ ctx, state, agent })
-
-    // A realistic pre-step decision: claimed real user message plus the
-    // harness's composed agent-instructions baseline (source.kind
-    // 'agent-instructions', the dsh-base dependency's shape).
-    const claimed = [
-      { role: 'user', content: [{ type: 'text', text: 'real first message' }], source: { kind: 'user' } },
-    ]
-    const harnessCopy = {
-      role: 'user',
-      content: [{ type: 'text', text: '<system-reminder>AGENTS.md</system-reminder>' }],
-      source: { kind: 'agent-instructions', baseline: true, baselineIdentity: 'x' },
-    }
-    const runtimeCtx = {
-      role: 'user',
-      content: [{ type: 'text', text: 'runtime context' }],
-      source: { kind: 'plugin', plugin: 'runtime-context' },
-    }
-    const decision = await runPreStep({
-      ctx, state,
-      payload: { agent, messages: claimed, turn: 1, step: 1, signal: new AbortController().signal },
-      initial: { kind: 'enter', messages: [...claimed, harnessCopy, runtimeCtx] },
-    })
-    const kinds = decision.messages.map((m) => m.source.kind)
-    assert.ok(!kinds.includes('agent-instructions'), `harness copy must be dropped, got ${kinds.join(', ')}`)
-    assert.ok(kinds.includes('user'), 'real user message preserved')
-    assert.ok(kinds.includes('plugin'), 'unrelated runtime context preserved')
-  } finally {
-    rmSync(cwd, { recursive: true, force: true })
-  }
-})
-
-test('agent/pre-step keeps the harness decision when nothing was injected', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
-  try {
-    const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, {}) // no AGENTS.md/CLAUDE.md in cwd → nothing injected
-    const session = makeSession({ cwd })
-    const agent = makeAgent({ session })
-    await runSeed({ ctx, state, agent })
-
-    const harnessCopy = {
-      role: 'user',
-      content: [{ type: 'text', text: '<system-reminder>AGENTS.md</system-reminder>' }],
-      source: { kind: 'agent-instructions', baseline: true, baselineIdentity: 'x' },
-    }
-    const decision = await runPreStep({
-      ctx, state,
-      payload: { agent, messages: [], turn: 1, step: 1, signal: new AbortController().signal },
-      initial: { kind: 'enter', messages: [harnessCopy] },
-    })
-    assert.deepEqual(decision.messages, [harnessCopy], 'harness instructions survive when the seed did not inject its own')
-  } finally {
-    rmSync(cwd, { recursive: true, force: true })
-  }
-})
-
-test('agent/pre-step failure degrades with a warning, no throw', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
-  try {
-    writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
-    const { ctx, state, warns } = makeCtx({ cwd })
-    apply(ctx, {})
-    const session = makeSession({ cwd })
-    const agent = makeAgent({ session })
-    await runSeed({ ctx, state, agent })
-
-    // A decision whose messages are a non-array (or null) must not throw.
-    const decision = await runPreStep({
-      ctx, state,
-      payload: { agent, messages: [], turn: 1, step: 1, signal: new AbortController().signal },
-      initial: { kind: 'enter', messages: null },
-    })
-    assert.deepEqual(decision, { kind: 'enter', messages: null }, 'non-array messages pass through untouched')
-  } finally {
-    rmSync(cwd, { recursive: true, force: true })
-  }
-})
-
 
 test('a session is seeded exactly once across repeated assemblies', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
@@ -450,7 +357,7 @@ test('virtual templates default to the pre-sampled minimal texts', async () => {
     const user = session.events[0]
     assert.match(
       user.data.content[0].text,
-      /^Session setup: please read the entire \.dsh\/s1\/agent-dev-guide\.md in the project root directory for detailed information, and work entirely according to the instructions it contains\. Do not reply yet — the actual task follows in the next message\.$/,
+      /^Please read the entire \.dsh\/s1\/agent-dev-guide\.md in the project root directory for detailed information, and work entirely according to the instructions it contains\.$/,
     )
     const reasoning = session.events[1].data.message.content[0]
     assert.equal(reasoning.type, 'reasoning')

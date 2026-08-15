@@ -34,7 +34,7 @@
 2. 插件同步写盘 guide 文件、同步追加事件;此时事件已进入 session 日志;
 3. 循环随后调用 `buildRequest`,其 `session.deriveMessages()` 已经包含虚拟轮。
 
-顺序保证:虚拟轮(→ AGENTS.md/CLAUDE.md 注入)必然先于真实用户消息进入转录。
+顺序保证:虚拟轮必然先于真实用户消息进入转录;AGENTS.md/CLAUDE.md 由 harness 的 dsh-agent-instructions 在真实消息之后注入(标准惯例)。
 
 ### 注入内容(事件序列,与 agent-loop 真实格式一致)
 
@@ -44,7 +44,7 @@
 | `assistant/message` | `surfaceOp: append` | content = `reasoning` 块 + `tool-call` 块;`arguments` 为 `{file_path}` 的 JSON 字符串 |
 | `tool/call` | 无(非 surface) | `{turn, step, callId, name, arguments}` |
 | `tool/result` | `surfaceOp: append` + `sourceEventSeqs: [callSeq]` | `tool-result` 块,内容为 guide 全文,渲染与 `dsh-tool-fs` 的 `read` 输出逐字节一致 |
-| `user/message`(可选) | `surfaceOp: append` | AGENTS.md/CLAUDE.md,`<system-reminder>` 框架,source `{kind: plugin}` |
+| `user/message`(可选) | `surfaceOp: append` | AGENTS.md/CLAUDE.md,由 harness 的 dsh-agent-instructions 在真实消息后注入(插件不注入) |
 
 刻意**不**追加 `turn/start`/`step/start`/`turn/end`:agent-loop 在构造时用
 `turn/start` 推导真实轮号,合成边界事件会与真实轮号冲突;消息事件已足以构成转录。
@@ -81,19 +81,17 @@ result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化�
    始终全量;首请求模型"以为"只有两工具(minimal system 声明),虚拟轮 result 揭示
    全量清单后自然调用。
 2. **只顶层注入**(用户确认):spawn 子 agent 直接全量目录,不锚定。
-3. **UI 如实呈现并标记**(用户确认):虚拟消息 source 均为 `{kind: 'plugin'}`,
-   导出 JSONL 可审计。
+3. **UI 如实呈现并标记**(用户确认,2026-08-15 更新):虚拟 user 消息
+   `source.kind: 'user'`(轨迹 UI 渲染为真实用户消息、opensTurn);虚拟 assistant /
+   tool result 沿用 harness 形状,导出 JSONL 可审计。
 4. **注入点选 `system-prompt/assemble` 而非 `agent/inbox/inserted`**:前者能自动捕获
    preset 真实提示词(elevation 内容),且注入顺序严格早于 `deriveMessages`;后者只能
    用配置文本;且 waterfall 的返回值权威,可同时改写 system 与保留 tools。
-5. **去重 harness 自带的 `dsh-agent-instructions`(dsh-base 依赖)**:插件自己注入
-    AGENTS.md/CLAUDE.md(顺序与用户描述一致);harness 内置的 agent-instructions
-    会在 `agent/pre-step` 里把 AGENTS.md 再次插入到**真实用户消息之后**(2026-08-15
-    dev 轨迹实测:虚拟轮 → AGENTS.md → 用户消息 → AGENTS.md 重复)。anchor-seed 以
-    `prepend: true` 注册 `agent/pre-step`,`next()` 后丢弃
-    `source.kind === 'agent-instructions'` 的消息,转录中恰好只有一条 instructions
-    消息、位于虚拟轮与真实首条消息之间。要增量更新则 `injectProjectInstructions:
-    false` 并挂回官方插件。
+5. **工作区指令交给 harness(2026-08-15 用户要求,对齐标准惯例)**:AGENTS.md/
+    CLAUDE.md 由 harness 自带的 `dsh-agent-instructions`(dsh-base 依赖)在**真实用户
+    首条消息之后**注入,顺序为 虚拟轮 → 用户真实首条消息 → AGENTS.md。插件不再自行
+    注入,也不注册 `agent/pre-step` 去重(该去重是早期双注入时代的产物,已移除);
+    `injectProjectInstructions` / `maxInstructionsBytes` 保留为惰性兼容键。
 6. **虚拟轮消息用 `turn: 1, step: 0`(而非 1:1)**:轨迹 UI 的 assistant-step 生命周期
     以 `${turn}:${step}` 为 id;虚拟轮打 1:1 会让它的 `assistant/message` 以 "update"
     先于真实 `step/start` 到达,触发 "received an update before its start Match"
