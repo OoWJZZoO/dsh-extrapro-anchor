@@ -25,6 +25,12 @@
 # Harness identity and per-tool guidance from changing the system prompt, while
 # runtime-context suppression leaves task and repository rules to user messages
 # and explicit file reads. Tool schemas and their runtime enforcement remain.
+# NOTE: because `complete` is re-imposed by the harness after the
+# system-prompt/assemble waterfall, anchor-seed's two-tool statement is NOT
+# visible in THIS preset — the final system is this one persona sentence.
+# That is deliberate: the tools the model actually uses are the full request
+# schemas below, and the old minimal tool names are not part of the real
+# callable surface.
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
@@ -35,11 +41,12 @@
 # The anchor-seed plugin replaces BOTH anchored-standard mechanisms at once:
 # the first request already exposes the FULL catalog below (no bootstrap), and
 # the minimal-style trajectory is seeded deterministically by one virtual read
-# turn appended to the session log before the first request. The guide file
-# `.dsh/<session id>/agent-dev-guide.md` is really written with the elevation
-# text; AGENTS.md/CLAUDE.md are injected by the plugin right after it, so the
-# `agent-instructions` row is intentionally NOT mounted here (mount it and set
-# `injectProjectInstructions: false` if you want its incremental updates).
+# turn appended to the session log before the first request. The single shared
+# guide file `.dsh/agent-dev-guide.md` is overwritten with the elevation text
+# on every fresh seed; the read result is durable in the session log.
+# AGENTS.md/CLAUDE.md are injected by the harness's dsh-agent-instructions
+# after the real first user message, so no `agent-instructions` row is mounted
+# here (the plugin's instruction keys are inert).
 - id: anchor-seed
   name: ./lib/index.js
   config:

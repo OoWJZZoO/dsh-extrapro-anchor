@@ -40,10 +40,10 @@
 
 | 事件 | surface 元数据 | 数据要点 |
 |---|---|---|
-| `user/message` | `surfaceOp: append` | role user;请求读 guide;source 标记 plugin |
-| `assistant/message` | `surfaceOp: append` | content = `reasoning` 块 + `tool-call` 块;`arguments` 为 `{file_path}` 的 JSON 字符串 |
-| `tool/call` | 无(非 surface) | `{turn, step, callId, name, arguments}` |
-| `tool/result` | `surfaceOp: append` + `sourceEventSeqs: [callSeq]` | `tool-result` 块,内容为 guide 全文,渲染与 `dsh-tool-fs` 的 `read` 输出逐字节一致 |
+| `user/message` | `surfaceOp: append` | role user;请求读 guide;source 为 `{ kind: 'user', form: 'anchor-seed' }`(kind 让轨迹 UI 开 user turn,form 用于 durable 识别与审计) |
+| `assistant/message` | `surfaceOp: append` | `turn:1, step:0`;content = `reasoning` 块 + `tool-call` 块;`arguments` 为 `{command}` 的 JSON 字符串 |
+| `tool/call` | 无(非 surface) | `{turn:1, step:0, callId, name, arguments}` |
+| `tool/result` | `surfaceOp: append` + `sourceEventSeqs: [callSeq]` | `tool-result` 块,内容为 `pwd && cat <guide>` 的原始 stdout(`<cwd>\n<内容>`) |
 | `user/message`(可选) | `surfaceOp: append` | AGENTS.md/CLAUDE.md,由 harness 的 dsh-agent-instructions 在真实消息后注入(插件不注入) |
 
 刻意**不**追加 `turn/start`/`step/start`/`turn/end`:agent-loop 在构造时用
@@ -51,35 +51,53 @@
 
 ### 一致性保证
 
-guide 文件在事件注入**之前**真实写盘(`<cwd>/.dsh/<sessionId>/agent-dev-guide.md`),
-内容 = elevation 句 + preset 真实提示词 + **全量工具目录文本**;虚拟 `tool/result` 用
+guide 文件在事件注入**之前**真实写盘(`<cwd>/.dsh/agent-dev-guide.md`,单一共享文件,
+每次 fresh seed 覆盖),内容 = elevation 句 + preset 真实提示词;虚拟 `tool/result` 用
 `pwd && cat` 的真实 stdout 渲染(`<cwd>\n<内容>`,minimal 面只有 bash,没有 read
-工具)。模型若之后真的去读该文件,得到与历史完全相同的文本——转录与磁盘互相印证,
-不会困惑。
+工具)。种子时转录与磁盘逐字一致;读取结果持久在会话日志中,此后转录不再依赖该文件
+是否被后来的会话覆盖。
 
 ### 系统提示词替换(全局、幂等)
 
 无论组合挂的是什么普通 preset,插件在每次 `system-prompt/assemble` 中把返回的
 `sections` 替换为两段:minimal persona 一句 + 两工具声明(仅 bash、
 str_replace_editor)。**工具 schemas 从不过滤**——`assembly.tools` 原样保留,首请求
-即全量目录;完整工具清单以文本形式渲染进 guide(`buildToolCatalogText`),由虚拟轮的
-result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化的 `request/header`
+即全量目录;每个工具的名称与描述直接来自 schema,guide 不再重复渲染目录文本。
+替换幂等且全局:每次 assemble 重放,持久化的 `request/header`
 保持在 minimal system(请求缓存友好);elevation 捕获在替换**之前**完成(seed 先跑)。
+
+**complete 段的交互(刻意设计):** 自包含 preset 的 persona 是 `complete: true`,
+harness 在 waterfall 之后会用该 complete 段覆盖返回的 sections,因此该 preset 的最终
+system 只有 minimal persona 一句,两工具声明不会出现。模型真正会调用的工具由全量
+schema 决定;旧的 minimal 工具名不属于真实可调用面,无需可见。叠加在没有 complete 段
+的普通 preset 上时,两工具声明才实际出现在 system 中。
+
+**动态段白名单(用户决策,2026-08-15):** `dynamicSections`(默认 `plan:policy`)
+是 minimal 替换保留的动态 system 段。waterfall 之后从原始 sections 中筛选白名单内、
+渲染文本非空的段,**追加在** minimal persona/tools 两段之后:plan mode 激活时规则仍
+进入 system;不激活时其动态文本为空、被丢弃。runtime CONTEXT 完全不动,保持请求缓存
+前缀稳定。
 
 ### 幂等与范围
 
-- `isFreshTopLevelAgent`:仅顶层(`delegationDepth === 0`)且尚无 `user/message` 的
-  会话;种子事件本身是 `user/message`,因此重复组装、resume、reload 天然幂等;
-- 进程内再加 `WeakSet<session>` 双保险;
-- 子 agent 永不注入(用户决策:只顶层);非顶层、非 fresh 的组装不改动 system。
+- `isTopLevelAgent`:仅顶层(`delegationDepth === 0` 且 `origin !== 'subagent'`);
+  `isFreshTopLevelAgent` 再要求尚无任何 `user/message`;
+- 是否已锚定由 **durable 日志**判定(`inspectAnchorTurn`):虚拟 user 带
+  `form: 'anchor-seed'` marker,旧日志按 `{kind:'user'}` + guide 路径识别。因此
+  resume/reload 后 system 仍保持 minimal 替换,不再依赖进程内状态;
+- `appendVirtualTurn` 幂等且可补全:完整轮次直接 no-op;被中断的半成品只追加缺失的
+  尾部事件(call id 复用日志中已有值);
+- 进程内 `WeakSet<agent>` 是快速路径/双保险;同一 session 的并发 assemble 共享一个
+  seed promise;
+- 子 agent 永不注入(用户决策:只顶层);非顶层、非锚定会话的组装不改动 system。
 
 ## 设计决策记录
 
 1. **system 由插件自己替换为 minimal(用户决策,2026-08-15 修正)**:目的不是"要求
    preset 配 minimal",而是**在任意普通 preset 上注入 minimal 提示词 + 虚拟对话,再
    重注入真实普通 preset 提示词**,同时继承优质思维链与多工具能力。工具 schemas
-   始终全量;首请求模型"以为"只有两工具(minimal system 声明),虚拟轮 result 揭示
-   全量清单后自然调用。
+   始终全量;首请求模型"以为"只有两工具(minimal system 声明),但请求 schema 本身
+   携带全量目录,因此模型可自然调用任意工具。
 2. **只顶层注入**(用户确认):spawn 子 agent 直接全量目录,不锚定。
 3. **UI 如实呈现并标记**(用户确认,2026-08-15 更新):虚拟 user 消息
    `source.kind: 'user'`(轨迹 UI 渲染为真实用户消息、opensTurn);虚拟 assistant /
@@ -98,10 +116,19 @@ result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化�
     硬断言、轨迹渲染异常(2026-08-15 实测)。step 0 避开该 id;turn 用 1(而非 0)让
     `firstVisibleTurn` 把 Initial System Prompt 定位在虚拟轮之前(2026-08-15 用户
     指出:turn 0 使 system 显示在 TOOL call 之后)。虚拟 user 的 `source.kind` 为
-    'user',轨迹 UI 将其渲染为真实用户消息(opensTurn)。已知代价:会话标题会基于
-    虚拟文本(与真实 user 共用 `source.kind==='user'` 判定),待后续修复。
-7. **fail-safe**:guard 自检(参照 dsh-read-image)、写盘失败、append 失败均降级为
-    "一次告警 + 会话无锚定继续",绝不向 harness 抛错。
+    'user',轨迹 UI 将其渲染为真实用户消息(opensTurn);额外 `form: 'anchor-seed'`
+   用于 durable 识别。标题副作用已修复:观察到引用虚拟消息的 `session/title` 且真实
+   首条消息已存在后,插件按真实消息纠正标题——title provider 可达时直接生成
+   provider 标题,否则追加由真实消息派生的修正 fallback(内置 first-prompt provider
+   永远取 messages[0],因此不能依赖 `refresh()`)。
+7. **fail-safe**:guard 自检(参照 dsh-read-image,含虚拟轮形状 dry-run 与 Node 版本
+   探测)、写盘失败、append 失败、缺 provider/model 路由均降级为"一次告警 + 会话
+   无锚定继续",绝不向 harness 抛错。缺路由时拒绝写虚拟 assistant,避免生成
+   restore 无法加载的日志。
+8. **单一共享 guide 文件(用户决策,2026-08-15)**:`.dsh/agent-dev-guide.md` 直接放在
+   `.dsh` 下,每次 fresh seed 覆盖。虚拟 bash 读一次后结果持久在会话日志中,无需按
+   session 分目录;代价是后续会话会覆盖同一文件,因此旧会话"再读文件"与历史不一定
+   一致——这是接受的取舍。
 
 ## 风险与待验证
 
@@ -112,8 +139,8 @@ result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化�
   (`session-1018c36f`,minimal),路径泛化为 `{path}` 占位;工具调用对齐 minimal 真实
   面(`bash` + `cat`,无 `read` 工具),工具结果为 `pwd && cat` 的真实 stdout 形态
   (`<cwd>\n<内容>`)。若换用其他采样轮,需保持同样的自洽约束。
-- **压缩**:elevation 在首个工具结果中,长会话的 compaction 可能摘要/裁剪;工具目录
-  恒定,请求前缀缓存只在首请求前后变化一次。
+- **压缩**:elevation 在首个工具结果中,长会话的 compaction 可能摘要/裁剪;请求的
+  工具 schemas 恒定,请求前缀缓存只在首请求前后变化一次。
 - **跨题泛化**:modeltest 作者明确 n=2 同题复现不构成跨任务证明;本插件的效果需在
   目标项目上独立验证。
 
@@ -124,5 +151,6 @@ result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化�
   harness 对照、98/99 双跑评审
 - DeepSeek Harness `47f9438`:`minimal-preset.snapshot.ts`("sends the exact RL
   prompt and schemas")、`dsh-agent-loop`(事件追加)、`dsh-session/surface`
-  (surface 契约)、`dsh-tool-fs`(read 输出格式)、`dsh-agent-instructions`
-  (instructions 注入格式)
+  (surface 契约)、`dsh-tool-bash`(bash stdout 输出格式)、
+  `dsh-agent-instructions`(instructions 注入格式)、`dsh-session-title`
+  (标题服务,虚拟 user 消息的标题补偿)

@@ -17,6 +17,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { assertVirtualTurnAppendable, buildBashReadResult, buildVirtualTurn, guideRelativePath } from './runtime.js'
 
 /** Where the full diagnostics of a failed self-check are written. */
 export function guardLogPath() {
@@ -90,8 +91,9 @@ export function checkHostEnvironment(ctx) {
   }
   // cordis context surface (system-prompt/assemble is dispatched as a
   // waterfall; listener-style ctx.on callbacks with next() work for it, as
-  // dsh-anchored-standard's tool-bootstrap demonstrates)
-  probe('ctx.on', '插件事件机制缺失（system-prompt/assemble 钩子依赖它）', () => typeof ctx?.on === 'function')
+  // dsh-anchored-standard's tool-bootstrap demonstrates). session/event is the
+  // same listener API and drives the cosmetic title recovery.
+  probe('ctx.on', '插件事件机制缺失（system-prompt/assemble 与 session/event 钩子依赖它）', () => typeof ctx?.on === 'function')
   // cordis exposes ctx.logger as a CALLABLE (ctx.logger() creates a named
   // logger; ctx.logger.warn/error also exist) — typeof is 'function', not
   // 'object'. Accept either shape as long as the warn/error methods exist.
@@ -103,6 +105,38 @@ export function checkHostEnvironment(ctx) {
       return (typeof logger === 'function' || typeof logger === 'object')
         && typeof logger?.warn === 'function'
         && typeof logger?.error === 'function'
+    },
+  )
+  // Cordis contexts expose lazy service lookup; the title recovery uses it to
+  // find the optional session-title service without making it a hard inject.
+  probe('ctx.get', 'Cordis 上下文服务查找缺失（ctx.get）', () => typeof ctx?.get === 'function')
+  // The plugin hand-builds harness message shapes. Validate our own builder
+  // against the CURRENT contract on every boot: a future edit that breaks the
+  // four-event shape disables the plugin here instead of writing a bad log.
+  probe(
+    'virtual-turn-shape',
+    '虚拟轮事件形状自检未通过（lib/runtime.js 与 harness 事件契约不一致）',
+    () => {
+      const events = buildVirtualTurn({
+        command: `pwd && cat ${guideRelativePath()}`,
+        resultText: buildBashReadResult('/work', 'guide'),
+        userText: 'Please read the entire .dsh/agent-dev-guide.md',
+        reasoningText: 'We need to read it.',
+        provider: 'guard',
+        model: 'guard',
+      })
+      assertVirtualTurnAppendable(events)
+      return true
+    },
+  )
+  // The event builder uses structuredClone when completing a partial seed and
+  // the runtime contract requires Node >= 22.19 (package engines).
+  probe(
+    'node-runtime',
+    `Node.js 运行时版本过低（package.json engines 要求 >= 22.19.0，当前 ${process.versions.node}）`,
+    () => {
+      const [major, minor] = process.versions.node.split('.').map(Number)
+      return Number.isInteger(major) && (major > 22 || (major === 22 && Number.isInteger(minor) && minor >= 19))
     },
   )
   return { ok: problems.length === 0, problems }

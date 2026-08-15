@@ -13,7 +13,7 @@
  *      following tools: bash, str_replace_editor …"). The request's TOOL
  *      SCHEMAS stay FULL — never filtered.
  *   1. SEED one virtual turn into the session log before the first request:
- *      [virtual] user asks the agent to fully read .dsh/<id>/agent-dev-guide.md
+ *      [virtual] user asks the agent to fully read .dsh/agent-dev-guide.md
  *      [virtual] asst pre-sampled minimal-style reasoning + one `bash` tool
  *                call (`pwd && cat <guide>` — the minimal preset's real
  *                surface; there is no `read` tool there)
@@ -22,8 +22,7 @@
  *                this document and work according to it, it means that your
  *                Agent's operation has changed to some extent; please work
  *                according to the following more detailed prompt:" + the
- *                preset's REAL prompt (persona section excluded) + the full
- *                tool catalog rendered as text (every tool name + description).
+ *                preset's REAL prompt (persona section excluded).
  *   2. [real] user      the user's actual first message.
  *   3. [injected] user  AGENTS.md / CLAUDE.md — composed by the harness's OWN
  *                       dsh-agent-instructions (a dsh-base dependency) AFTER
@@ -31,9 +30,10 @@
  *                       convention. anchor-seed does NOT inject them itself.
  *
  * Net effect: the model believes it has two tools (minimal system statement),
- * opens with "We need …", then the virtual turn's result reveals the full
- * catalog as text — it learns the real capability set and freely calls any
- * tool, while the request schemas were full the whole time (cache friendly).
+ * opens with "We need …", then the virtual turn's result reveals the preset's
+ * real prompt. The request schemas stay full the whole time, so every tool
+ * name + description comes from the schemas themselves — not duplicated into
+ * the guide file (cache friendly).
  *
  * The guide file is REALLY written to disk first (content identical to the
  * virtual result), so a later real read of the file cannot contradict the
@@ -49,7 +49,7 @@
  *
  * Seeding happens inside the `system-prompt/assemble` waterfall of the first
  * step — after `next()` resolves, the full section list is available for the
- * elevation auto-capture and the tool-catalog text, and the appended events
+ * elevation auto-capture, and the appended events
  * are already in the log before `buildRequest` calls
  * `session.deriveMessages()`. The section replacement happens AFTER seeding so
  * the guide captures the composition's REAL prompt, not the minimal one.
@@ -57,23 +57,27 @@
  * Fail-safe: every failure path logs a warning and leaves the session running
  * WITHOUT the anchor. A plugin hook must never throw into the harness.
  */
-import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
   PLUGIN_NAME,
+  ANCHOR_USER_SOURCE_FORM,
   DEFAULT_ELEVATION_NOTICE,
   DEFAULT_VIRTUAL_USER_TEMPLATE,
   DEFAULT_VIRTUAL_REASONING_TEMPLATE,
   DEFAULT_VIRTUAL_COMMAND_TEMPLATE,
+  assertVirtualTurnAppendable,
   buildGuideContent,
   buildVirtualTurn,
   appendVirtualTurn,
   buildBashReadResult,
   buildMinimalSections,
-  buildToolCatalogText,
   guideAbsolutePath,
   guideRelativePath,
+  hasPartialAnchorTurn,
+  isAnchorSeeded,
   isFreshTopLevelAgent,
+  isTopLevelAgent,
   interpolatePath,
   interpolateVariables,
 } from './runtime.js'
@@ -85,6 +89,7 @@ export const name = PLUGIN_NAME
 // by the dispatch, and node:fs. Fewer injects = fewer upgrade break points.
 export const inject = []
 
+/** Kept for backward-compatible imports; instructions are owned by the harness now. */
 export const DEFAULT_MAX_INSTRUCTIONS_BYTES = 65536
 /**
  * The system-prompt section name of the persona, excluded from auto-capture.
@@ -97,45 +102,81 @@ export const DEFAULT_MAX_INSTRUCTIONS_BYTES = 65536
 export const DEFAULT_PERSONA_SECTION = 'deployment:persona'
 
 /**
- * Validate the composition-row config. Invalid values throw at apply time
- * (preset mount), where they are visible and fixable — the same policy
- * dsh-anchored-standard's tool-bootstrap uses.
+ * Dynamic system-prompt sections preserved by the global minimal replacement.
+ * `plan:policy` is dsh-plan-mode's guidance section: when plan mode is active
+ * its dynamic text is non-empty, and the section is appended AFTER the minimal
+ * persona/tools sections so the plan rules still reach the model without
+ * touching runtime CONTEXT (whose cache prefix stays stable).
+ */
+export const DEFAULT_DYNAMIC_SECTIONS = ['plan:policy']
+
+/**
+ * Normalize the composition-row config. Invalid values fall back to the safe
+ * default and are reported through `warnings` (logged once by `apply`), so a
+ * typo degrades the anchor text instead of taking the harness boot down.
  */
 export function parseConfig(config) {
   const cfg = config ?? {}
+  const warnings = []
+  const warn = (key, fallback) => warnings.push(
+    `${PLUGIN_NAME}: invalid config "${key}", falling back to the default (${fallback})`,
+  )
   const elevationPrompt = typeof cfg.elevationPrompt === 'string' ? cfg.elevationPrompt : ''
   const elevationNotice =
     typeof cfg.elevationNotice === 'string' && cfg.elevationNotice.trim().length > 0
       ? cfg.elevationNotice
       : DEFAULT_ELEVATION_NOTICE
-  const elevationSource = cfg.elevationSource === 'config' || cfg.elevationSource === 'none' ? cfg.elevationSource : 'auto'
+
+  let elevationSource = cfg.elevationSource
+  if (elevationSource === undefined) elevationSource = 'auto'
+  if (elevationSource !== 'auto' && elevationSource !== 'config' && elevationSource !== 'none') {
+    warn('elevationSource', 'auto')
+    elevationSource = 'auto'
+  }
+
   const personaSection =
     typeof cfg.personaSection === 'string' && cfg.personaSection.length > 0 ? cfg.personaSection : DEFAULT_PERSONA_SECTION
-  const virtualUserTemplate =
-    typeof cfg.virtualUserTemplate === 'string' && cfg.virtualUserTemplate.includes('{path}')
-      ? cfg.virtualUserTemplate
-      : DEFAULT_VIRTUAL_USER_TEMPLATE
-  const virtualReasoningTemplate =
-    typeof cfg.virtualReasoningTemplate === 'string' && cfg.virtualReasoningTemplate.includes('{path}')
-      ? cfg.virtualReasoningTemplate
-      : DEFAULT_VIRTUAL_REASONING_TEMPLATE
-  const virtualToolName =
-    typeof cfg.virtualToolName === 'string' && cfg.virtualToolName.length > 0 ? cfg.virtualToolName : 'bash'
-  const virtualCommandTemplate =
-    typeof cfg.virtualCommandTemplate === 'string' && cfg.virtualCommandTemplate.includes('{path}')
-      ? cfg.virtualCommandTemplate
-      : DEFAULT_VIRTUAL_COMMAND_TEMPLATE
-  // Accepted for backward compatibility: workspace instructions (AGENTS.md/
-  // CLAUDE.md) are now injected by the harness's OWN dsh-agent-instructions
-  // after the user's real first message (standard convention). These knobs are
-  // inert — set injectProjectInstructions: false only as documentation; the
-  // actual behavior is controlled by whether dsh-agent-instructions is mounted.
-  const injectProjectInstructions = cfg.injectProjectInstructions !== false
-  const maxInstructionsBytes =
-    Number.isSafeInteger(cfg.maxInstructionsBytes) && cfg.maxInstructionsBytes > 0
-      ? cfg.maxInstructionsBytes
-      : DEFAULT_MAX_INSTRUCTIONS_BYTES
+
+  const template = (key, fallback) => {
+    const value = cfg[key]
+    if (value === undefined) return fallback
+    if (typeof value === 'string' && value.includes('{path}')) return value
+    warn(key, fallback)
+    return fallback
+  }
+  const virtualUserTemplate = template('virtualUserTemplate', DEFAULT_VIRTUAL_USER_TEMPLATE)
+  const virtualReasoningTemplate = template('virtualReasoningTemplate', DEFAULT_VIRTUAL_REASONING_TEMPLATE)
+  const virtualCommandTemplate = template('virtualCommandTemplate', DEFAULT_VIRTUAL_COMMAND_TEMPLATE)
+
+  let virtualToolName = cfg.virtualToolName
+  if (virtualToolName === undefined) virtualToolName = 'bash'
+  if (typeof virtualToolName !== 'string' || virtualToolName.length === 0) {
+    warn('virtualToolName', 'bash')
+    virtualToolName = 'bash'
+  }
+
+  let dynamicSections = cfg.dynamicSections
+  if (dynamicSections === undefined) dynamicSections = [...DEFAULT_DYNAMIC_SECTIONS]
+  if (!Array.isArray(dynamicSections) || dynamicSections.some((name) => typeof name !== 'string' || name.length === 0)) {
+    warn('dynamicSections', DEFAULT_DYNAMIC_SECTIONS.join(', '))
+    dynamicSections = [...DEFAULT_DYNAMIC_SECTIONS]
+  } else {
+    dynamicSections = [...new Set(dynamicSections)]
+  }
+
   const guardEnabled = cfg.guard?.enabled !== false
+
+  // Accepted for backward compatibility but inert: workspace instructions are
+  // injected by the harness's OWN dsh-agent-instructions after the real first
+  // user message. Surface a one-time warning when they are configured so the
+  // knobs no longer look effective.
+  if (cfg.injectProjectInstructions !== undefined || cfg.maxInstructionsBytes !== undefined) {
+    warnings.push(
+      `${PLUGIN_NAME}: injectProjectInstructions and maxInstructionsBytes are inert — ` +
+      'workspace instructions are owned by the harness dsh-agent-instructions plugin',
+    )
+  }
+
   return {
     elevationPrompt,
     elevationNotice,
@@ -145,9 +186,9 @@ export function parseConfig(config) {
     virtualReasoningTemplate,
     virtualToolName,
     virtualCommandTemplate,
-    injectProjectInstructions,
-    maxInstructionsBytes,
+    dynamicSections,
     guardEnabled,
+    warnings,
   }
 }
 
@@ -168,6 +209,14 @@ function captureElevation(assembled, cfg) {
     .join('\n\n')
     .trim()
   return text.length > 0 ? text : cfg.elevationPrompt
+}
+
+/** Concatenate the text blocks of a message-shaped object. */
+function messageTextOf(message) {
+  return (message?.content ?? [])
+    .filter((block) => block?.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
 }
 
 export function apply(ctx, config) {
@@ -192,14 +241,22 @@ export function apply(ctx, config) {
     }
   }
 
-  // Sessions already seeded in this process. The durable-log freshness check in
-  // isFreshTopLevelAgent covers resume/reload; the WeakSet is belt-and-braces
-  // for repeated assemblies inside one process.
-  const seeded = new WeakSet()
-  let warned = false
-  const warnOnce = (message) => {
-    if (warned) return
-    warned = true
+  for (const warning of cfg.warnings) {
+    try {
+      ctx.logger.warn(warning)
+    } catch {
+      // Logger unavailable — configuration warnings are non-fatal anyway.
+    }
+  }
+
+  // Sessions anchored in this process. The durable-log scan (isAnchorSeeded /
+  // hasPartialAnchorTurn) covers resume/reload; the WeakSet is the in-process
+  // fast path and belt-and-braces against repeated assemblies.
+  const anchored = new WeakSet()
+  const warnedSessions = new WeakSet()
+  const warnSession = (session, message) => {
+    if (session && warnedSessions.has(session)) return
+    if (session) warnedSessions.add(session)
     try {
       ctx.logger.warn(message)
     } catch {
@@ -208,51 +265,41 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Seed one session: write the guide file, gather instructions, append the
-   * virtual turn. Any failure logs a warning and leaves the session running
-   * without the anchor — never throws to the harness.
+   * Seed one session: write the single shared guide file and append the
+   * virtual turn. Any failure throws to the listener, which logs one warning
+   * and leaves the session running without the anchor — never into the
+   * harness boot path.
    */
   const seed = async (agent, assembled) => {
     const session = agent.session
-    if (typeof session.append !== 'function') {
+    if (!session || typeof session.append !== 'function') {
       throw new Error(`${name}: session.append unavailable — anchor not seeded`)
     }
+    // A virtual assistant/message with empty provider/model would be rejected
+    // by Session.fromRestore later, making the whole session unloadable.
+    // Refuse to write that event shape; the harness's own request pipeline
+    // will report a missing route if it is genuinely missing.
+    const provider = agent.options?.provider
+    const model = agent.options?.model
+    if (typeof provider !== 'string' || provider.length === 0 || typeof model !== 'string' || model.length === 0) {
+      throw new Error(`${name}: agent has no provider/model route — refusing to write an unrestorable virtual assistant message`)
+    }
     const cwd = session.header?.cwd ?? process.cwd()
-    const guidePath = guideAbsolutePath(cwd, session.id)
-    // The transcript references the PROJECT-ROOT-RELATIVE path (matching the
-    // sampled minimal round: "…entire .dsh/<id>/agent-dev-guide.md in the
-    // project root directory…"); the file is written at the absolute path.
-    const displayPath = guideRelativePath(session.id)
+    const guidePath = guideAbsolutePath(cwd)
+    // The transcript references the PROJECT-ROOT-RELATIVE path; the file is
+    // written at the absolute path. One shared file, overwritten per fresh
+    // seed: the virtual read result is durable in the session log.
+    const displayPath = guideRelativePath()
     // The guide carries the composition's REAL prompt (captured before the
-    // system sections are replaced below) PLUS the full tool catalog rendered
-    // as text: after the virtual read the model sees every tool it may
-    // actually call, even though the first request's system prompt described
-    // only the two minimal tools.
-    const toolCatalog = buildToolCatalogText(assembled?.tools)
-    const guideContent = buildGuideContent({
+    // system sections are replaced below). The full tool catalog is NOT
+    // duplicated into the guide: the request's tool schemas already carry
+    // every tool name + description.
+    const fullGuideContent = buildGuideContent({
       notice: cfg.elevationNotice,
       prompt: captureElevation(assembled, cfg),
     })
-    const fullGuideContent = toolCatalog.length > 0 ? `${guideContent}\n\n${toolCatalog}` : guideContent
-
-    // 1) The REAL file must exist before the virtual turn references it, so a
-    //    later genuine read returns the identical content.
-    await mkdir(dirname(guidePath), { recursive: true })
-    await writeFile(guidePath, fullGuideContent, 'utf8')
-
-    // 2) The virtual anchor turn itself: sampled minimal-style reasoning plus
-    //    one bash call whose fabricated result is the exact stdout of the
-    //    command (`pwd && cat {path}` → `<cwd>\n<content>`).
-    //    AGENTS.md/CLAUDE.md are NOT injected here: the harness's own
-    //    dsh-agent-instructions (a dsh-base dependency) composes them AFTER
-    //    the claimed real user messages, matching the standard convention
-    //    (virtual turn → REAL user first message → AGENTS.md). Disable that
-    //    harness plugin if you want no workspace instructions at all.
-    const events = []
-    const provider = agent.options?.provider ?? ''
-    const model = agent.options?.model ?? ''
     const command = interpolatePath(cfg.virtualCommandTemplate, displayPath)
-    events.unshift(...buildVirtualTurn({
+    const events = buildVirtualTurn({
       command,
       resultText: buildBashReadResult(cwd, fullGuideContent),
       userText: interpolatePath(cfg.virtualUserTemplate, displayPath),
@@ -260,11 +307,173 @@ export function apply(ctx, config) {
       toolName: cfg.virtualToolName,
       provider,
       model,
-    }))
+    })
 
-    appendVirtualTurn(session, events)
-    seeded.add(agent)
+    // Validate the whole turn against the current event contract BEFORE the
+    // first append, so an upstream shape change degrades cleanly instead of
+    // leaving a partial transcript.
+    assertVirtualTurnAppendable(events)
+
+    // 1) The REAL file must exist before the virtual turn references it, so a
+    //    later genuine read returns the identical content. `.dsh` is created
+    //    non-recursively: recursive mkdir can hang on pseudo-filesystems.
+    const guideDir = dirname(guidePath)
+    try {
+      await mkdir(guideDir)
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') throw error
+    }
+    await writeFile(guidePath, fullGuideContent, 'utf8')
+
+    // 2) The virtual anchor turn itself: sampled minimal-style reasoning plus
+    //    one bash call whose fabricated result is the exact stdout of the
+    //    command (`pwd && cat {path}` → `<cwd>\n<content>`). The append is
+    //    idempotent: a partial turn from an interrupted seed is completed.
+    //    AGENTS.md/CLAUDE.md are NOT injected here: the harness's own
+    //    dsh-agent-instructions (a dsh-base dependency) composes them AFTER
+    //    the claimed real user messages, matching the standard convention
+    //    (virtual turn → REAL user first message → AGENTS.md). Disable that
+    //    harness plugin if you want no workspace instructions at all.
+    appendVirtualTurn(session, events, displayPath)
+    anchored.add(agent)
   }
+
+  /** One seed attempt per session; concurrent assemblies await the same promise. */
+  const seeding = new Map()
+  const seedOnce = (agent, assembled) => {
+    const key = agent.session?.id
+    if (key !== undefined && seeding.has(key)) return seeding.get(key)
+    const promise = seed(agent, assembled)
+    if (key !== undefined) {
+      seeding.set(key, promise)
+      promise.finally(() => {
+        if (seeding.get(key) === promise) seeding.delete(key)
+      }).catch(() => {
+        // The listener already handles the rejection; this arm only prevents
+        // an unhandled rejection from the cleanup chain.
+      })
+    }
+    return promise
+  }
+
+  // ── session title recovery ─────────────────────────────────────────────
+  //
+  // The virtual user message is `source.kind: 'user'` so the trajectory opens
+  // a real user turn. The harness session-title service keys on the same field
+  // and therefore titles the session from the VIRTUAL request (the built-in
+  // first-prompt provider always picks messages[0]). Once a title event citing
+  // the virtual message is observed after the real first message, replace it:
+  // with a mounted title provider we generate a fresh title from the REAL
+  // message and append it as a provider title; otherwise we append a corrected
+  // deterministic fallback ourselves.
+  const titleFixed = new WeakSet()
+  const realTitleText = (session) => {
+    const events = Array.isArray(session?.events) ? session.events : []
+    const anchorSeq = events.findIndex((event) =>
+      event.type === 'user/message' && event.data?.source?.form === ANCHOR_USER_SOURCE_FORM,
+    )
+    if (anchorSeq < 0) return { anchorSeq, realSeq: -1, text: '' }
+    const realSeq = events.findIndex((event, index) =>
+      index > anchorSeq && event.type === 'user/message' &&
+      event.data?.source?.kind === 'user' && event.data?.source?.form !== ANCHOR_USER_SOURCE_FORM,
+    )
+    if (realSeq < 0) return { anchorSeq, realSeq, text: '' }
+    return { anchorSeq, realSeq, text: messageTextOf(events[realSeq]?.data) }
+  }
+  const titleCitesVirtual = (session, anchorSeq) => {
+    const title = session?.events?.findLast((event) => event.type === 'session/title')
+    return title?.data?.messageSeqs?.includes(anchorSeq) === true
+  }
+  const appendTitle = async (session, titleText, realSeq, source) => {
+    if (typeof titleText !== 'string' || titleText.trim().length === 0) return false
+    await Promise.resolve()
+    try {
+      session.append('session/title', {
+        title: titleText.trim(),
+        messageSeqs: [realSeq],
+        source,
+      })
+      return true
+    } catch (error) {
+      warnSession(session, `${name}: session title correction append failed (cosmetic): ${String((error && error.message) || error)}`)
+      return false
+    }
+  }
+  const fallbackTitle = (text, config) => {
+    const maxWords = Number.isSafeInteger(config?.fallbackMaxWords) ? config.fallbackMaxWords : 8
+    const maxBytes = Number.isSafeInteger(config?.fallbackMaxBytes) ? config.fallbackMaxBytes : 64
+    const words = String(text).replace(/\s+/gu, ' ').trim().split(' ').filter(Boolean)
+    const joined = words.slice(0, maxWords).join(' ')
+    const bytes = Buffer.from(joined, 'utf8')
+    return (bytes.length <= maxBytes ? joined : bytes.subarray(0, maxBytes).toString('utf8')).trim()
+  }
+  const fixSessionTitle = async (session) => {
+    if (!session || titleFixed.has(session)) return
+    const { anchorSeq, realSeq, text } = realTitleText(session)
+    if (anchorSeq < 0 || realSeq < 0 || text.length === 0) return
+    if (!titleCitesVirtual(session, anchorSeq)) {
+      titleFixed.add(session)
+      return
+    }
+    let titleService
+    try {
+      titleService = typeof ctx.get === 'function' ? ctx.get('sessionTitle') : undefined
+    } catch {
+      titleService = undefined
+    }
+    const registration = titleService?.registration
+    if (registration && !registration.closing && typeof registration.provider?.generate === 'function') {
+      titleFixed.add(session)
+      const provider = registration.provider
+      const route = session.requestHeader?.()?.config
+      let generated
+      try {
+        generated = await provider.generate({
+          session,
+          messages: [{ seq: session.events[realSeq].seq, text }],
+          ...(route === undefined ? {} : { route }),
+          signal: new AbortController().signal,
+        })
+      } catch (error) {
+        warnSession(session, `${name}: real-message title generation failed, using fallback: ${String((error && error.message) || error)}`)
+      }
+      const generatedTitle = typeof generated?.title === 'string' ? generated.title.trim() : ''
+      if (generatedTitle.length > 0) {
+        const source = {
+          kind: 'provider',
+          provider: typeof provider.id === 'string' && provider.id.length > 0 ? provider.id : name,
+          ...(generated?.model !== undefined ? { model: generated.model } : {}),
+        }
+        await appendTitle(session, generatedTitle, session.events[realSeq].seq, source)
+        return
+      }
+    } else {
+      titleFixed.add(session)
+    }
+    // No provider or provider generation failed: append a deterministic fallback.
+    const fallback = fallbackTitle(text, titleService?.config)
+    if (fallback.length > 0) await appendTitle(session, fallback, session.events[realSeq].seq, { kind: 'fallback' })
+  }
+  ctx.on('session/event', (session, event) => {
+    if (!session) return
+    if (event?.type === 'session/title') {
+      void fixSessionTitle(session)
+      return
+    }
+    // With no mounted title provider, the fallback title is written from the
+    // VIRTUAL message before the real one exists; correct it as soon as the
+    // real first message lands. With a provider, wait for its title event so
+    // our correction cannot race the provider's own pending generation.
+    if (event?.type === 'user/message' && event.data?.source?.kind === 'user' && event.data?.source?.form !== ANCHOR_USER_SOURCE_FORM) {
+      let titleService
+      try {
+        titleService = typeof ctx.get === 'function' ? ctx.get('sessionTitle') : undefined
+      } catch {
+        titleService = undefined
+      }
+      if (!(titleService?.registration && !titleService.registration.closing)) void fixSessionTitle(session)
+    }
+  })
 
   // ── replace the system prompt with the minimal persona + two-tool statement,
   //    and seed the virtual turn on the first assembly of a fresh top-level session
@@ -274,9 +483,10 @@ export function apply(ctx, config) {
   // sentence + a tool-catalog statement listing only bash/str_replace_editor),
   // so it opens inside the minimal trajectory ("We need …"), while the request's
   // TOOL SCHEMAS stay FULL (28 tools — never filtered). The guide file written
-  // here carries the composition's REAL prompt plus the full tool catalog as
-  // text; the virtual turn's bash result reveals it, and the model then freely
-  // calls the full catalog. The section replacement is GLOBAL and idempotent:
+  // here carries the composition's REAL prompt; the virtual turn's bash result
+  // reveals it, and the model then freely calls the full catalog — whose names
+  // and descriptions come from the schemas, not from guide text. The section
+  // replacement is GLOBAL and idempotent:
   // every assemble() (every step/turn) re-applies it, so the persisted
   // request/header stays on the minimal system for request-cache stability.
   ctx.on('system-prompt/assemble', async (assembly, context, next) => {
@@ -284,21 +494,38 @@ export function apply(ctx, config) {
     const assembled = await next()
     const agent = context?.agent
     try {
-      if (!agent) return assembled
+      if (!isTopLevelAgent(agent)) return assembled
       const fresh = isFreshTopLevelAgent(agent)
-      const alreadySeeded = seeded.has(agent)
-      if (!fresh && !alreadySeeded) return assembled // subagents / non-fresh: untouched
-      if (fresh && !alreadySeeded) {
-        // First assembly of a fresh top-level session: capture the REAL prompt
-        // (still full at this point) into the guide and append the virtual turn.
-        await seed(agent, assembled)
+      const partial = hasPartialAnchorTurn(agent)
+      const durable = isAnchorSeeded(agent)
+      const alreadyAnchored = anchored.has(agent)
+      if (!fresh && !partial && !durable && !alreadyAnchored) return assembled
+      if ((fresh || partial) && !alreadyAnchored) {
+        // First assembly of a fresh top-level session (or completion of an
+        // interrupted seed): capture the REAL prompt (still full at this
+        // point) into the guide and append/complete the virtual turn.
+        await seedOnce(agent, assembled)
       }
+      // Only replace the system for sessions that actually carry the anchor.
+      // A seed that failed (e.g. missing route) leaves the assembly untouched.
+      if (!anchored.has(agent) && !isAnchorSeeded(agent)) return assembled
       // Global replacement: minimal persona + two-tool statement. Tools schemas
-      // are left intact — the full catalog is revealed by the guide text.
-      assembled.sections = buildMinimalSections()
+      // are left intact — every tool name + description comes from the schemas,
+      // not from the guide text.
+      const minimalSections = buildMinimalSections()
+      // Whitelisted dynamic sections (plan mode guidance) are appended AFTER
+      // the minimal sections when their rendered text is non-empty. Their text
+      // is the harness's own dynamic evaluation: an inactive plan mode renders
+      // empty and is dropped. Dynamic CONTEXT is deliberately not touched.
+      const dynamicSections = assembled.sections.filter(
+        (section) => cfg.dynamicSections.includes(section.name) &&
+          typeof section.text === 'string' && section.text.trim().length > 0,
+      )
+      assembled.sections = [...minimalSections, ...dynamicSections]
       return assembled
     } catch (error) {
-      warnOnce(
+      warnSession(
+        agent?.session,
         `${name}: anchor seeding failed for session "${agent?.session?.id ?? '?'}", ` +
         `session continues without the anchor: ${String((error && error.message) || error)}`,
       )

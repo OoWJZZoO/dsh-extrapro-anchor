@@ -25,7 +25,7 @@ system         minimal persona 一句 + 两工具声明
                ("You have access to the following tools: bash,
                 str_replace_editor …")——无论挂的是哪个普通 preset,其完整提示词
                在这里被插件替换掉
-[user]         "Please read the entire <项目>/.dsh/<session id>/agent-dev-guide.md
+[user]         "Please read the entire <项目>/.dsh/agent-dev-guide.md
                 in the project root directory for detailed information, and work
                 entirely according to the instructions it contains."
 [assistant]    minimal 风格 reasoning + 一次 bash 工具调用
@@ -35,8 +35,6 @@ system         minimal persona 一句 + 两工具声明
                  changed to some extent; please work according to the
                  following more detailed prompt:
                  <该 preset 的真实提示词>
-                 The full tool catalog available in this session:
-                 - bash: … - read: … - edit: …(每个工具名 + 描述)
 [user]         用户真实首条消息
 [user]         AGENTS.md / CLAUDE.md(system-reminder 框架——由 harness 自带的
                dsh-agent-instructions 注入,位于真实消息之后)
@@ -44,19 +42,29 @@ tools          完整目录——请求里的工具 SCHEMAS 从不被过滤
 ```
 
 模型首次回复之前,转录严格就是这一序列:minimal persona → 虚拟读文件请求 →
-虚拟 assistant 回应 + 工具调用 → guide 内容(preset 真实提示词唯一展开的位置,外加
-全量工具目录文本)→ 用户真实首条消息 → AGENTS.md(harness 惯例)。插件自身**从不**
+虚拟 assistant 回应 + 工具调用 → guide 内容(preset 真实提示词唯一展开的位置)→
+用户真实首条消息 → AGENTS.md(harness 惯例)。插件自身**从不**
 注入工作区指令;harness 内置 `dsh-agent-instructions`(dsh-base 依赖)在真实用户消息
 之后编排 AGENTS.md/CLAUDE.md,与标准模式一致。除此之外不注入任何东西,preset 提示词
 不会泄漏到任何其他通道误导模型。
 
 系统替换是**全局且幂等**的:每次 `system-prompt/assemble` 都重新应用 minimal 段,
 持久化的 `request/header` 在后续 step/turn 一直保持 minimal(请求缓存友好);工具
-schemas 全程是全量目录——模型只是"以为"只有两个工具,直到虚拟轮的 result 揭示完整
-清单。
+schemas 全程是全量目录。完整目录不再复制进 guide 文件——每个工具的名称与描述都由
+schema 本身提供。system 文字与工具 schema 的刻意错位是设计决策:虚拟轮已经"调用过
+一次工具",全量 schema 才是模型真正能调用的面,两工具声明只塑造首请求策略。
+白名单中的动态段(默认 `plan:policy`)在激活时**追加在** minimal 两段之后,plan mode
+规则仍能进入 system,同时不动 runtime context 及其缓存前缀。
 
-guide 文件会在事件注入前**真实写盘**,内容与虚拟结果逐字一致,后续模型若真的去读该
-文件不会发现矛盾。
+> **自包含 preset 注意。** `preset/agent.cordis.yml` 保持 persona `complete: true`;
+> harness 会在 waterfall 之后强制执行该 complete 段,因此在这个 preset 里最终 system
+> 只有 minimal persona 一句(两工具声明不可见)。这也是刻意的:模型真正会用到的工具
+> 来自全量请求 schema,旧的 minimal 工具名不属于真实可调用面,不必出现。叠加在**没有**
+> complete 段的普通 preset 上时,两工具声明会正常出现在 system 里。
+
+guide 文件会在事件注入前**真实写盘**——单一共享 `.dsh/agent-dev-guide.md`,每次
+fresh seed 直接覆盖,内容与虚拟结果逐字一致;读取结果已持久化在会话日志中,注入后
+转录不再依赖该文件。
 
 ## 为什么这样做
 
@@ -161,10 +169,11 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
 | `elevationSource` | `auto` | `auto`:捕获组装中的非 persona 提示词段(空则回退 `elevationPrompt`);`config`:只用 `elevationPrompt`;`none`:只有句子。 |
 | `elevationNotice` | `When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:` | 固定框架句。 |
 | `personaSection` | `deployment:persona` | 自动捕获时排除的段名(与 harness 自身在 dsh-system-prompt 中注册的 persona 段名一致)。 |
-| `virtualUserTemplate` | 预采样(见 `lib/runtime.js`) | 虚拟用户消息模板;`{path}` 替换为项目根相对路径(`.dsh/<id>/agent-dev-guide.md`)。默认文本来自 modeltest 指纹最优一轮的逐字采样。 |
+| `virtualUserTemplate` | 预采样(见 `lib/runtime.js`) | 虚拟用户消息模板;`{path}` 替换为项目根相对路径(`.dsh/agent-dev-guide.md`)。默认文本来自 modeltest 指纹最优一轮的逐字采样。 |
 | `virtualReasoningTemplate` | 预采样(见 `lib/runtime.js`) | 虚拟 assistant 的 reasoning 文本;默认是同一轮的逐字 minimal "We need" 首块。 |
 | `virtualToolName` | `bash` | 虚拟 assistant 调用的工具名(minimal 实际面是 `bash` + `str_replace_editor`,没有 `read` 工具)。 |
 | `virtualCommandTemplate` | `pwd && cat {path}` | bash 命令;其虚构 stdout 即工具结果。 |
+| `dynamicSections` | `['plan:policy']` | minimal 替换保留的动态 system 段白名单。段渲染文本非空时,追加在 minimal persona/tools 两段**之后**(例如 plan mode 激活时的规则文本)。 |
 | `injectProjectInstructions` | `true` | **惰性(兼容保留)。** 工作区指令由 harness 自带的 `dsh-agent-instructions` 在用户真实首条消息之后注入。 |
 | `maxInstructionsBytes` | `65536` | **惰性(兼容保留)。** 见 `injectProjectInstructions`。 |
 | `guard.enabled` | `true` | 环境自检开关;`false` 跳过自检强行加载。 |
@@ -173,11 +182,11 @@ cp -R preset "$dsh_home/.agent-presets/anchor-seed"
 
 导出 session JSONL,检查首轮事件:
 
-- 一个 `user/message`(读请求,source 为 `plugin`)、一个含 `reasoning` 块与单个
-  `tool-call` 的 `assistant/message`、一个 `tool/call`、一个内容为 guide 文件的
-  `tool/result`;
+- 一个 `user/message`(source 为 `{ kind: 'user', form: 'anchor-seed' }`)、一个含
+  `reasoning` 块与单个 `tool-call` 的 `assistant/message`、一个 `tool/call`、一个
+  内容为 guide 文件的 `tool/result`;
 - `tool/result` 带 `surfaceOp: append` 与 `sourceEventSeqs: [<tool/call seq>]`;
-- `.dsh/<session id>/agent-dev-guide.md` 真实存在且与虚拟结果内容一致;
+- `.dsh/agent-dev-guide.md` 真实存在且与虚拟结果正文一致;
 - 首个 `request/header` 已包含完整工具目录。
 
 零依赖测试:
@@ -190,15 +199,22 @@ npm test
 
 - 种子在首个 `system-prompt/assemble` waterfall 内追加,早于 `buildRequest` 派生
   请求消息——首个真实请求必然包含虚拟轮。
-- 仅顶层新鲜会话:子 agent(`delegationDepth > 0`)永不注入;已有 `user/message` 的
-  会话永不重复注入(种子事件是持久的,resume/reload 天然幂等)。
-- 虚拟 `tool/result` 与 `dsh-tool-fs` 的 `read` 输出逐字节一致(`<path>` 信封、行号、
-  `(End of file - total N lines)`),且磁盘文件相同,真实读取无法推翻转录。
-- 所有失败路径都降级:自检失败、guide 写入失败、会话拒绝事件——只记一次告警,会话
-  不带锚定继续运行;插件钩子绝不向 harness 抛错。
+- 仅顶层新鲜会话:子 agent(`delegationDepth > 0` 或 `origin: 'subagent'`)永不注入;
+  已有真实 `user/message` 的会话永不重复注入。是否已锚定由 durable 日志判定,因此
+  resume/reload 后 system 仍保持 minimal 替换;被中断的半成品 seed 会在下一次组装时
+  补全,而不是重新注入。
+- 虚拟 `tool/result` 是 `pwd && cat <guide>` 的原始 stdout(`<cwd>\n<内容>`,bash,
+  不是 read 工具信封)。共享 guide 文件每次 fresh seed 覆盖;虚拟读取结果持久在会话
+  日志里。
+- 会话标题服务会先拿虚拟 user 消息起标题(内置 first-prompt provider 永远取第一条
+  user 消息)。真实首条消息落盘且出现引用虚拟消息的 `session/title` 后,插件会纠正它:
+  标题 provider 可达时按真实消息生成 provider 标题;否则(以及作为确定性兜底)追加
+  一条由真实消息派生的修正 fallback。
+- 所有失败路径都降级:自检失败、guide 写入失败、缺少模型路由、会话拒绝事件——只记
+  一次告警,会话不带锚定继续运行;插件钩子绝不向 harness 抛错。
 - 插件无网络请求、无遥测。
-- 与 shell 同级信任:插件会向项目写入一个文件(`.dsh/<session id>/agent-dev-guide.md`),
-  请把 `.dsh/` 加入项目 .gitignore。
+- 与 shell 同级信任:插件会向项目写入一个文件(`.dsh/agent-dev-guide.md`),请把
+  `.dsh/` 加入项目 .gitignore。
 
 ## 已知限制
 
@@ -208,7 +224,8 @@ npm test
 - 虚拟工具结果是 `pwd && cat <guide>` 的虚构 stdout(`<cwd>\n<内容>`)。若覆盖
   `virtualCommandTemplate`,请保持结果格式与该命令真实输出一致。
 - elevation 位于首个工具结果;长会话的压缩可能摘要或裁剪它(anchored-standard 的一次
-  性晋升也有同样约束)。工具目录恒定,因此请求前缀缓存只在首请求前后变化一次。
+  性晋升也有同样约束)。请求的工具 schemas 恒定,因此请求前缀缓存只在首请求前后变化
+  一次。
 - 需要在你自己的模型/环境上做 n=1 实测;已发布的 98/99 证据针对 DeepSeek V4 Pro 与
   单一冻结题面。
 

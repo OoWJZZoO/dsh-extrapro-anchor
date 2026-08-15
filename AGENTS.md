@@ -13,8 +13,8 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 ## Layout
 
 - `lib/runtime.js` — pure, harness-free logic (event construction, guide
-  content, bash-stdout result rendering, instructions text). No Cordis imports;
-  fully unit-tested. Keep it that way.
+  content, bash-stdout result rendering, durable anchor-state inspection).
+  No Cordis imports; fully unit-tested. Keep it that way.
 - `lib/index.js` — the Cordis host plugin: config parsing, fail-safe guard
   wiring, the `system-prompt/assemble` hook, file writing, event injection.
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
@@ -22,8 +22,9 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 - `preset/` — self-contained example preset (minimal persona + Standard tools
   + the anchor-seed row). `preset/lib/` is a BUILD SNAPSHOT: after changing
   `lib/`, run `./scripts/build-preset.sh`.
-- `test/` — `node --test`; run `npm test` (58 tests). `lib/runtime.js` must
-  stay testable with zero harness dependencies.
+- `test/` — `node --test`; run `npm test` (70 tests incl. the reference
+  dsh-anchored-standard tree under this checkout). `lib/runtime.js` must stay
+  testable with zero harness dependencies.
 
 ## Invariants (do not break)
 
@@ -33,15 +34,19 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    down.
 2. **Never re-seed.** `isFreshTopLevelAgent` (no prior `user/message`, top
    level only) plus the per-process WeakSet guarantee one seed per session.
-   Resume/reload stays idempotent because seeded events are durable.
+   Whether a session is already anchored is decided from the DURABLE log
+   (`form: 'anchor-seed'` marker / `inspectAnchorTurn`), so resume/reload keeps
+   the minimal system replacement. A partial seed is completed, never restarted.
 3. **The transcript must be internally consistent.** The virtual turn runs
    on the minimal preset's REAL surface: `bash` (there is no `read` tool in
    minimal), the command defaults to `pwd && cat {path}`, and the `tool/result`
    is the exact raw stdout that command produces (`<cwd>\n<content>`).
-   `lib/index.js` writes the guide file with identical content BEFORE appending
-   the events, so a real later read/cat cannot contradict the transcript. If
-   you override `virtualCommandTemplate`, keep the fabricated result consistent
-   with that command's real output.
+   `lib/index.js` writes the shared guide file `.dsh/agent-dev-guide.md` with
+   identical content BEFORE appending the events, so the virtual result and
+   the file agree at seed time. The read result is durable in the log; the
+   shared file is overwritten by later fresh seeds. If you override
+   `virtualCommandTemplate`, keep the fabricated result consistent with that
+   command's real output.
 4. **Surface metadata is load-bearing.** `user/message`,
    `assistant/message`, and `tool/result` are surface-eligible events:
    `Session.append` REQUIRES `surfaceOp: 'append'`, and `tool/result` also
@@ -61,18 +66,27 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    render; step 0 avoids that key. Turn 1 (not 0) keeps the Initial System
    Prompt (`firstVisibleTurn`) ahead of the virtual prelude. The virtual
    user message uses `source.kind: 'user'` so the UI renders it as a real
-   user message (opens a turn).
+   user message (opens a turn), plus `source.form: 'anchor-seed'` so the
+   durable log can distinguish it from real human input and recover the
+   session title from the real first message.
 6. **The plugin replaces the system prompt itself — no preset precondition.**
    On every `system-prompt/assemble` of a top-level session, the returned
    `assembly.sections` are replaced with the minimal persona sentence (byte-
    identical to the harness minimal preset) plus a two-tool statement listing
    only `bash` and `str_replace_editor`. The tool SCHEMAS are never filtered —
-   the request always carries the full catalog; the full catalog is revealed
-   as TEXT inside the guide file (rendered via `buildToolCatalogText`), so the
-   virtual turn's result is what tells the model the real capability set. The
-   replacement is idempotent and global: re-applied on every assemble so the
-   persisted request/header stays minimal (request-cache friendly). Elevation
-   capture must read the sections BEFORE the replacement (seed runs first).
+   the request always carries the full catalog (every tool name +
+   description), so the guide file must NOT duplicate the catalog as text; the
+   schemas themselves are the single source of truth for the capability set.
+   The replacement is idempotent and global: re-applied on every assemble so
+   the persisted request/header stays minimal (request-cache friendly).
+   Elevation capture must read the sections BEFORE the replacement (seed runs
+   first). Whitelisted dynamic sections (`dynamicSections`, default
+   `plan:policy`) are appended AFTER the two minimal sections when their
+   rendered text is non-empty; never touch runtime CONTEXT (its cache prefix
+   must stay stable). When the composition's persona is `complete: true` (as
+   in `preset/agent.cordis.yml`), the harness re-imposes that complete section
+   after the waterfall, so the final system is the persona sentence alone —
+   this is deliberate; the tools the model actually uses are the full schemas.
 7. **Workspace instructions are the harness's job — the plugin does not
    inject AGENTS.md/CLAUDE.md.** The harness bundles
    `@deepseek-ai/dsh-agent-instructions` (a dsh-base dependency) which
@@ -87,7 +101,8 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 
 - `elevationSource: auto` captures the non-persona sections seen inside the
   `system-prompt/assemble` waterfall (before the complete-section wipe).
-  Excluded section name is `personaSection` (default `persona`).
+  Excluded section name is `personaSection` (default `deployment:persona`,
+  the harness's own `PERSONA_SECTION`).
 - The default `virtualUserTemplate`/`virtualReasoningTemplate` are verbatim
   text from the best modeltest-fingerprint round (`session-1018c36f`, minimal
   preset), selected by `scripts/find-best-sampling-round.mjs`; the path is
@@ -106,7 +121,9 @@ npm run check     # syntax check lib/* + full test run
 ```
 
 Before shipping: confirm the exported JSONL of a fresh session shows exactly
-the seeded event sequence (user/message → assistant/message → tool/call →
-tool/result [+ instructions user/message]) with correct surface metadata, the
-guide file on disk matches the virtual result, and the first `request/header`
-carries the full catalog.
+the seeded event sequence (user/message with
+`source = { kind: 'user', form: 'anchor-seed' }` → assistant/message →
+tool/call → tool/result, then the real user message and harness-injected
+AGENTS.md) with correct surface metadata, the shared guide file
+`.dsh/agent-dev-guide.md` matches the virtual result body, and the first
+`request/header` carries the full catalog.

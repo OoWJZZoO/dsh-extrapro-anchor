@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { apply, name, parseConfig } from '../lib/index.js'
 import { checkHostEnvironment } from '../lib/guards.js'
+import { appendVirtualTurn, buildVirtualTurn, guideRelativePath } from '../lib/runtime.js'
 
-function makeCtx({ cwd }) {
+function makeCtx({ cwd, sessionTitle } = {}) {
   const state = { listeners: new Map() }
   const warns = []
   const errors = []
@@ -17,6 +18,10 @@ function makeCtx({ cwd }) {
       list.push({ callback, options })
       state.listeners.set(event, list)
     },
+    get(name) {
+      if (name === 'sessionTitle' && sessionTitle !== undefined) return sessionTitle
+      throw new Error(`no service ${name} in test context`)
+    },
     logger: {
       warn(message) { warns.push(message) },
       error(message) { errors.push(message) },
@@ -25,11 +30,11 @@ function makeCtx({ cwd }) {
   return { ctx, state, warns, errors }
 }
 
-function makeSession({ id = 's1', depth = 0, events = [], cwd }) {
+function makeSession({ id = 's1', depth = 0, origin, events = [], cwd }) {
   const log = [...events]
   const session = {
     id,
-    header: { cwd, delegationDepth: depth },
+    header: { cwd, delegationDepth: depth, ...(origin === undefined ? {} : { origin }) },
     events: log,
     append(type, data, opts) {
       const logged = { type, seq: log.length, time: Date.now(), data, opts }
@@ -59,20 +64,36 @@ function makeAssembly(personaText = 'You are a helpful software engineer assista
 
 async function runSeed({ ctx, state, agent, assembly = makeAssembly() }) {
   const listener = state.listeners.get('system-prompt/assemble')?.at(-1)?.callback
+  assert.equal(typeof listener, 'function')
   return listener(assembly, { agent }, async () => assembly)
+}
+
+/** Append a complete virtual turn directly to a test session. */
+function seedTurn(session) {
+  const events = buildVirtualTurn({
+    command: `pwd && cat ${guideRelativePath()}`,
+    resultText: `/work\nWhen the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:`,
+    userText: `Please read the entire ${guideRelativePath()} in the project root directory for detailed information, and work entirely according to the instructions it contains.`,
+    reasoningText: 'We need to read it.',
+    provider: 'p',
+    model: 'm',
+  })
+  appendVirtualTurn(session, events, guideRelativePath())
+  return events
 }
 
 test('exports a diagnostic plugin name', () => {
   assert.equal(name, 'anchor-seed')
 })
 
-test('apply registers a system-prompt/assemble listener', () => {
+test('apply registers a system-prompt/assemble and session/event listener', () => {
   const { ctx, state } = makeCtx({ cwd: '/' })
   apply(ctx, {})
   assert.equal(typeof state.listeners.get('system-prompt/assemble')?.at(-1)?.callback, 'function')
+  assert.equal(typeof state.listeners.get('session/event')?.at(-1)?.callback, 'function')
 })
 
-test('a fresh top-level session is seeded: events + real guide file', async () => {
+test('a fresh top-level session is seeded: events + real shared guide file', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state, warns } = makeCtx({ cwd })
@@ -101,16 +122,18 @@ test('a fresh top-level session is seeded: events + real guide file', async () =
     assert.match(resultText, /Model is deepseek-v4-pro in \/work\./)
     assert.doesNotMatch(resultText, /\(End of file - total/) // bash cat, not read
 
-    // The virtual call is bash with the interpolated relative path
+    // The virtual call is bash with the interpolated shared path
     const call = session.events.find((e) => e.type === 'tool/call')
     assert.equal(call.data.name, 'bash')
-    assert.deepEqual(JSON.parse(call.data.arguments), { command: 'pwd && cat .dsh/s1/agent-dev-guide.md' })
+    assert.deepEqual(JSON.parse(call.data.arguments), { command: 'pwd && cat .dsh/agent-dev-guide.md' })
 
-    // The real file exists with content identical to the virtual result
-    const guidePath = join(cwd, '.dsh', 's1', 'agent-dev-guide.md')
+    // The real file exists directly under .dsh with content identical to the
+    // virtual result body.
+    const guidePath = join(cwd, '.dsh', 'agent-dev-guide.md')
     assert.equal(existsSync(guidePath), true)
     const fileContent = readFileSync(guidePath, 'utf8')
     assert.match(fileContent, /Work in a calm, direct style\./)
+    assert.equal(resultText, `${cwd}\n${fileContent}`)
     assert.equal(warns.length, 0)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -155,31 +178,8 @@ test('AGENTS.md/CLAUDE.md are NOT injected by the plugin (harness owns them)', a
     apply(ctx, {})
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
-    // The seed appends only the virtual turn: no extra instructions message.
-    // AGENTS.md/CLAUDE.md are injected by the harness's own
-    // dsh-agent-instructions AFTER the real user message (standard convention).
     const types = session.events.map((e) => e.type)
     assert.deepEqual(types, ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
-  } finally {
-    rmSync(cwd, { recursive: true, force: true })
-  }
-})
-
-test('injectProjectInstructions is inert (accepted for backward compatibility)', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
-  try {
-    writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
-    const { ctx, state } = makeCtx({ cwd })
-    apply(ctx, { injectProjectInstructions: false })
-    const session = makeSession({ cwd })
-    await runSeed({ ctx, state, agent: makeAgent({ session }) })
-    assert.deepEqual(session.events.map((e) => e.type), ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
-    // true behaves identically — the plugin never injects instructions itself
-    const { ctx: ctx2, state: state2 } = makeCtx({ cwd })
-    apply(ctx2, { injectProjectInstructions: true })
-    const session2 = makeSession({ cwd })
-    await runSeed({ ctx: ctx2, state: state2, agent: makeAgent({ session: session2 }) })
-    assert.deepEqual(session2.events.map((e) => e.type), ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -195,18 +195,13 @@ test('virtual turn events carry turn 1 step 0 (no collision with the real first 
     const assistant = session.events.find((e) => e.type === 'assistant/message')
     const call = session.events.find((e) => e.type === 'tool/call')
     const result = session.events.find((e) => e.type === 'tool/result')
-    // Regression: the trajectory UI keys the assistant-step lifecycle on
-    // `${turn}:${step}`; stamping the virtual turn 1:1 made its
-    // assistant/message arrive as an "update" before the real step/start
-    // ("received an update before its start Match"), breaking the render.
-    // Turn 1 (not 0) so the Initial System Prompt (firstVisibleTurn) lands
-    // BEFORE the virtual prelude; step 0 keeps it off the real 1:1 key.
     assert.deepEqual({ turn: assistant.data.turn, step: assistant.data.step }, { turn: 1, step: 0 })
     assert.deepEqual({ turn: call.data.turn, step: call.data.step }, { turn: 1, step: 0 })
     assert.deepEqual({ turn: result.data.turn, step: result.data.step }, { turn: 1, step: 0 })
-    // The virtual user message is rendered as a real user message (opensTurn)
+    // The virtual user message renders as a real user message but is durable-marked
     const user = session.events.find((e) => e.type === 'user/message')
     assert.equal(user.data.source.kind, 'user')
+    assert.equal(user.data.source.form, 'anchor-seed')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -229,27 +224,97 @@ test('a session is seeded exactly once across repeated assemblies', async () => 
   }
 })
 
-test('subagents are never seeded', async () => {
+test('subagents (depth or origin) are never seeded', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, {})
-    const session = makeSession({ cwd, depth: 1 })
-    await runSeed({ ctx, state, agent: makeAgent({ session }) })
-    assert.equal(session.events.length, 0)
+    const byDepth = makeSession({ cwd, depth: 1 })
+    await runSeed({ ctx, state, agent: makeAgent({ session: byDepth }) })
+    assert.equal(byDepth.events.length, 0)
+    const byOrigin = makeSession({ cwd, origin: 'subagent' })
+    await runSeed({ ctx, state, agent: makeAgent({ session: byOrigin }) })
+    assert.equal(byOrigin.events.length, 0)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
 
-test('sessions that already produced a user message are not seeded (resume safety)', async () => {
+test('sessions that already produced a real user message are not seeded', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
     apply(ctx, {})
-    const session = makeSession({ cwd, events: [{ type: 'user/message', seq: 0, data: { role: 'user', content: [] } }] })
+    const session = makeSession({
+      cwd,
+      events: [{
+        type: 'user/message',
+        seq: 0,
+        time: 1,
+        data: { role: 'user', id: 'u', content: [{ type: 'text', text: 'hello' }], source: { kind: 'user', rpcId: 'r1' } },
+        opts: { surfaceOp: 'append' },
+      }],
+    })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     assert.equal(session.events.length, 1)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('a resumed anchor session keeps the minimal system replacement (durable detection)', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const session = makeSession({ cwd })
+    seedTurn(session)
+    const countBefore = session.events.length
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {}) // fresh plugin instance, empty WeakSet — simulates resume/reload
+    const result = await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    assert.equal(session.events.length, countBefore) // no re-seed
+    assert.equal(result.sections.length, 2)
+    assert.equal(result.sections[0].text, 'You are a helpful software engineer assistant.')
+    assert.match(result.sections[1].text, /bash, str_replace_editor/)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('an interrupted partial seed is completed on the next assembly', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const events = buildVirtualTurn({
+      command: `pwd && cat ${guideRelativePath()}`,
+      resultText: '/work\nN',
+      userText: `Please read the entire ${guideRelativePath()}`,
+      reasoningText: 'We need to read it.',
+      provider: 'p',
+      model: 'm',
+    })
+    const session = makeSession({ cwd })
+    session.append(events[0].type, events[0].data, events[0].opts)
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {})
+    await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    assert.equal(session.events.length, 4)
+    assert.deepEqual(session.events.map((e) => e.type), ['user/message', 'assistant/message', 'tool/call', 'tool/result'])
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('a missing provider/model route refuses to seed instead of writing an unrestorable log', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state, warns } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    const agent = { session, options: {} }
+    const result = await runSeed({ ctx, state, agent })
+    assert.equal(session.events.length, 0)
+    assert.equal(result.sections.length, 2) // assembly untouched after seed failure
+    assert.ok(warns.length >= 1)
+    assert.match(warns.at(-1), /no provider\/model route/)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -258,9 +323,8 @@ test('sessions that already produced a user message are not seeded (resume safet
 test('a session without session.append degrades with a warning, no throw', async () => {
   const { ctx, state, warns } = makeCtx({ cwd: '/' })
   apply(ctx, {})
-  const agent = { session: { id: 'x', header: { cwd: '/' }, events: [], append: undefined }, options: {} }
-  const listener = state.listeners.get('system-prompt/assemble')?.at(-1)?.callback
-  const result = await listener(makeAssembly(), { agent }, async () => makeAssembly())
+  const agent = { session: { id: 'x', header: { cwd: '/' }, events: [], append: undefined }, options: { provider: 'p', model: 'm' } }
+  const result = await runSeed({ ctx, state, agent })
   assert.equal(result.sections.length, 2) // assembly passes through untouched
   assert.ok(warns.length >= 1)
   assert.match(warns[0], /session continues without the anchor/)
@@ -269,15 +333,13 @@ test('a session without session.append degrades with a warning, no throw', async
 test('a file write failure degrades with a warning, no throw', async () => {
   const { ctx, state, warns } = makeCtx({ cwd: '/' })
   apply(ctx, {})
-  // cwd "/" exists; force failure by making the .dsh path unwritable is hard
-  // cross-platform — instead point cwd at a path whose parent is a FILE.
+  // Point cwd at a path whose parent is a FILE: creating .dsh must fail.
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   const blocker = join(cwd, 'block')
   writeFileSync(blocker, 'x')
   try {
-    const agent = { session: { id: 's1', header: { cwd: blocker }, events: [], append: () => { throw new Error('unreachable') } }, options: {} }
-    const listener = state.listeners.get('system-prompt/assemble')?.at(-1)?.callback
-    const result = await listener(makeAssembly(), { agent }, async () => makeAssembly())
+    const agent = { session: { id: 's1', header: { cwd: blocker }, events: [], append: () => { throw new Error('unreachable') } }, options: { provider: 'p', model: 'm' } }
+    const result = await runSeed({ ctx, state, agent })
     assert.equal(result.sections.length, 2)
     assert.ok(warns.length >= 1)
   } finally {
@@ -311,12 +373,9 @@ test('guard.enabled false bypasses the self-check', () => {
 })
 
 test('guard accepts the cordis callable-logger shape (function with methods)', () => {
-  // Regression: cordis v4 exposes ctx.logger as a CALLABLE function
-  // (ctx.logger() creates a named logger; ctx.logger.warn/error also exist).
-  // typeof is 'function', not 'object' — a naive probe made the plugin inert
-  // on a real boot (observed on the dev profile, 2026-08-15).
   const ctx = {
     on: () => {},
+    get: () => undefined,
     logger: Object.assign(function logger() {}, { warn: () => {}, error: () => {} }),
   }
   const result = checkHostEnvironment(ctx)
@@ -324,30 +383,50 @@ test('guard accepts the cordis callable-logger shape (function with methods)', (
   assert.deepEqual(result.problems, [])
 })
 
-test('parseConfig validates and defaults', () => {
+test('guard rejects a context without service lookup', () => {
+  const ctx = {
+    on: () => {},
+    logger: { warn: () => {}, error: () => {} },
+  }
+  const result = checkHostEnvironment(ctx)
+  assert.equal(result.ok, false)
+  assert.ok(result.problems.some((p) => p.name === 'ctx.get'))
+})
+
+test('parseConfig defaults, warns on invalid values, and reports inert instruction knobs', () => {
   const defaults = parseConfig(undefined)
   assert.equal(defaults.elevationSource, 'auto')
   assert.equal(defaults.virtualToolName, 'bash')
   assert.match(defaults.virtualCommandTemplate, /\{path\}/)
-  assert.equal(defaults.injectProjectInstructions, true)
+  assert.deepEqual(defaults.dynamicSections, ['plan:policy'])
   assert.equal(defaults.guardEnabled, true)
+  assert.deepEqual(defaults.warnings, [])
+
   const custom = parseConfig({
     elevationSource: 'config',
     elevationPrompt: 'X',
     virtualToolName: 'cat',
     virtualCommandTemplate: 'cat {path}',
-    injectProjectInstructions: false,
+    dynamicSections: ['plan:policy', 'plan:policy', 'future:mode'],
     guard: { enabled: false },
-    maxInstructionsBytes: 1234,
   })
   assert.equal(custom.elevationSource, 'config')
   assert.equal(custom.virtualToolName, 'cat')
   assert.equal(custom.virtualCommandTemplate, 'cat {path}')
-  assert.equal(custom.injectProjectInstructions, false)
+  assert.deepEqual(custom.dynamicSections, ['plan:policy', 'future:mode'])
   assert.equal(custom.guardEnabled, false)
-  assert.equal(custom.maxInstructionsBytes, 1234)
-  // unknown elevationSource values fall back to 'auto'
-  assert.equal(parseConfig({ elevationSource: 'bogus' }).elevationSource, 'auto')
+  assert.deepEqual(custom.warnings, [])
+
+  const invalid = parseConfig({ elevationSource: 'bogus', virtualUserTemplate: 'no placeholder', dynamicSections: 'not-an-array' })
+  assert.equal(invalid.elevationSource, 'auto')
+  assert.match(invalid.virtualUserTemplate, /\{path\}/)
+  assert.deepEqual(invalid.dynamicSections, ['plan:policy'])
+  assert.ok(invalid.warnings.some((w) => w.includes('elevationSource')))
+  assert.ok(invalid.warnings.some((w) => w.includes('virtualUserTemplate')))
+  assert.ok(invalid.warnings.some((w) => w.includes('dynamicSections')))
+
+  const inert = parseConfig({ injectProjectInstructions: false, maxInstructionsBytes: 1234 })
+  assert.ok(inert.warnings.some((w) => w.includes('inert')))
 })
 
 test('virtual templates default to the pre-sampled minimal texts', async () => {
@@ -360,11 +439,11 @@ test('virtual templates default to the pre-sampled minimal texts', async () => {
     const user = session.events[0]
     assert.match(
       user.data.content[0].text,
-      /^Please read the entire \.dsh\/s1\/agent-dev-guide\.md in the project root directory for detailed information, and work entirely according to the instructions it contains\.$/,
+      /^Please read the entire \.dsh\/agent-dev-guide\.md in the project root directory for detailed information, and work entirely according to the instructions it contains\.$/,
     )
     const reasoning = session.events[1].data.message.content[0]
     assert.equal(reasoning.type, 'reasoning')
-    assert.match(reasoning.text, /^We need respond to user asking to read entire \.dsh\/s1\/agent-dev-guide\.md/)
+    assert.match(reasoning.text, /^We need respond to user asking to read entire \.dsh\/agent-dev-guide\.md/)
     assert.doesNotMatch(reasoning.text, /\{path\}/) // interpolated, no placeholder left
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -385,7 +464,6 @@ test('system sections are replaced with minimal persona + two-tool statement', a
       { name: 'edit', description: 'Edit a file', parameters: { type: 'object' } },
     ]
     const result = await runSeed({ ctx, state, agent, assembly })
-    // Global replacement: the returned assembly's sections are the minimal ones
     assert.equal(result.sections.length, 2)
     assert.equal(result.sections[0].name, 'persona')
     assert.equal(result.sections[0].text, 'You are a helpful software engineer assistant.')
@@ -402,7 +480,36 @@ test('system sections are replaced with minimal persona + two-tool statement', a
   }
 })
 
-test('guide content includes the full tool catalog text', async () => {
+test('whitelisted dynamic sections are appended after the minimal system sections', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    const agent = makeAgent({ session })
+    const assembly = makeAssembly()
+    assembly.sections.push({ name: 'plan:policy', order: 50, text: 'You are in plan mode. Stay in plan mode until exit_plan_mode succeeds.' })
+    const result = await runSeed({ ctx, state, agent, assembly })
+    assert.equal(result.sections.length, 3)
+    assert.equal(result.sections[0].name, 'persona')
+    assert.equal(result.sections[1].name, 'tools')
+    assert.equal(result.sections[2].name, 'plan:policy')
+    assert.match(result.sections[2].text, /You are in plan mode/)
+    // A dynamic section whose text renders empty (plan mode inactive) is dropped
+    const { ctx: ctx2, state: state2 } = makeCtx({ cwd })
+    apply(ctx2, {})
+    const session2 = makeSession({ cwd })
+    const assembly2 = makeAssembly()
+    assembly2.sections.push({ name: 'plan:policy', order: 50, text: '' })
+    const result2 = await runSeed({ ctx: ctx2, state: state2, agent: makeAgent({ session: session2 }), assembly: assembly2 })
+    assert.equal(result2.sections.length, 2)
+    assert.equal(result2.sections.some((s) => s.name === 'plan:policy'), false)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('guide content keeps the elevation but does not duplicate the tool catalog', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
@@ -417,13 +524,84 @@ test('guide content includes the full tool catalog text', async () => {
     ]
     await runSeed({ ctx, state, agent, assembly })
     const resultText = session.events.find((e) => e.type === 'tool/result').data.message.content[0].content[0].text
-    assert.match(resultText, /The full tool catalog available in this session:/)
-    assert.match(resultText, /- bash: Run commands in a shell/)
-    assert.match(resultText, /- web_search: Search the web/)
-    assert.match(resultText, /- subagent: Delegate work/)
-    // The elevation (non-persona sections) is still captured BEFORE the catalog
     assert.match(resultText, /Work in a calm, direct style\./)
     assert.match(resultText, /Model is deepseek-v4-pro in \/work\./)
+    assert.doesNotMatch(resultText, /The full tool catalog available in this session:/)
+    assert.doesNotMatch(resultText, /- bash: Run commands in a shell/)
+    assert.doesNotMatch(resultText, /- web_search: Search the web/)
+    assert.doesNotMatch(resultText, /- subagent: Delegate work/)
+    const fileContent = readFileSync(join(cwd, '.dsh', 'agent-dev-guide.md'), 'utf8')
+    assert.doesNotMatch(fileContent, /The full tool catalog available in this session:/)
+    assert.doesNotMatch(fileContent, /- bash: Run commands in a shell/)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('session title recovery regenerates from the real first message when a provider exists', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    let seenMessages
+    const sessionTitle = {
+      registration: {
+        provider: {
+          id: 'test-title-provider',
+          generate: async ({ messages }) => {
+            seenMessages = messages
+            return { title: 'Fix the build please', messageSeqs: [messages[0].seq] }
+          },
+        },
+      },
+      config: { fallbackMaxWords: 8, fallbackMaxBytes: 80 },
+    }
+    const { ctx, state } = makeCtx({ cwd, sessionTitle })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    const anchorSeq = session.events[0].seq
+    const realEvent = session.append('user/message', {
+      role: 'user', id: 'real', content: [{ type: 'text', text: 'Fix the build please' }],
+      source: { kind: 'user', rpcId: 'r1', clientTimeZone: 'Asia/Shanghai' },
+    }, { surfaceOp: 'append' })
+    const virtualTitle = session.append('session/title', { title: 'Please read the entire...', messageSeqs: [anchorSeq], source: { kind: 'provider', provider: 'test-title-provider' } })
+    const sessionListener = state.listeners.get('session/event')?.at(-1)?.callback
+    sessionListener(session, virtualTitle)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const lastTitle = session.events.findLast((e) => e.type === 'session/title')
+    assert.equal(lastTitle.data.title, 'Fix the build please')
+    assert.deepEqual(lastTitle.data.messageSeqs, [realEvent.seq])
+    assert.equal(lastTitle.data.source.kind, 'provider')
+    assert.equal(lastTitle.data.source.provider, 'test-title-provider')
+    assert.deepEqual(seenMessages, [{ seq: realEvent.seq, text: 'Fix the build please' }])
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('session title recovery appends a corrected fallback when no title provider exists', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const sessionTitle = {
+      registration: undefined,
+      config: { fallbackMaxWords: 8, fallbackMaxBytes: 80 },
+    }
+    const { ctx, state } = makeCtx({ cwd, sessionTitle })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    const anchorSeq = session.events[0].seq
+    session.append('session/title', { title: 'Please read the entire...', messageSeqs: [anchorSeq], source: { kind: 'fallback' } })
+    const realEvent = session.append('user/message', {
+      role: 'user', id: 'real', content: [{ type: 'text', text: 'Fix the build please' }],
+      source: { kind: 'user', rpcId: 'r1' },
+    }, { surfaceOp: 'append' })
+    const sessionListener = state.listeners.get('session/event')?.at(-1)?.callback
+    sessionListener(session, realEvent)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const lastTitle = session.events.findLast((e) => e.type === 'session/title')
+    assert.equal(lastTitle.data.title, 'Fix the build please')
+    assert.deepEqual(lastTitle.data.messageSeqs, [realEvent.seq])
+    assert.equal(lastTitle.data.source.kind, 'fallback')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }

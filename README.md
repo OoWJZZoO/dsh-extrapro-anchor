@@ -33,7 +33,7 @@ system         minimal persona sentence + a two-tool statement
                 str_replace_editor …") — whatever ordinary preset was mounted,
                its full prompt is replaced here
 [user]         "Please read the entire
-               <project>/.dsh/<session id>/agent-dev-guide.md in the project
+               <project>/.dsh/agent-dev-guide.md in the project
                root directory for detailed information, and work entirely
                according to the instructions it contains."
 [assistant]    minimal-style reasoning + one `bash` tool call
@@ -44,8 +44,6 @@ system         minimal persona sentence + a two-tool statement
                  changed to some extent; please work according to the
                  following more detailed prompt:
                  <the preset's REAL prompt>
-                 The full tool catalog available in this session:
-                 - bash: … - read: … - edit: … (every tool with description)
 [user]         the user's actual first message
 [user]         AGENTS.md / CLAUDE.md (system-reminder framing — injected by the
                harness's OWN dsh-agent-instructions, AFTER the real message)
@@ -54,7 +52,7 @@ tools          the FULL catalog — the request's TOOL SCHEMAS are never filtere
 
 That exact sequence — minimal persona, virtual read request, virtual
 assistant reply + tool call, guide content (the only place the real preset
-expands, plus the full tool catalog as text), the user's real first message,
+expands), the user's real first message,
 then AGENTS.md (harness convention) — is the whole transcript before the
 model's first reply. The plugin never injects workspace instructions itself:
 the harness's built-in `dsh-agent-instructions` (a dsh-base dependency) places
@@ -66,12 +64,28 @@ The system replacement is **global and idempotent**: every
 `system-prompt/assemble` re-applies the minimal sections, so the persisted
 `request/header` stays on the minimal system across steps and turns (request
 cache friendly), while the tool schemas remain the full catalog the whole
-time — the model only *thinks* it has two tools until the virtual turn's
-result reveals the full list.
+time. The catalog is not duplicated into the guide file: every tool name and
+description comes from the schemas themselves. The system/tool-schema split is
+deliberate — the virtual turn has already "called a tool once", so the full
+schemas are what the model can actually invoke; the two-tool statement only
+shapes the first request's strategy. Whitelisted dynamic sections (default
+`plan:policy`) are appended AFTER those two minimal sections when active, so
+plan-mode guidance still reaches the system without touching runtime context
+and its cache prefix.
 
-The guide file is **really written to disk** with exactly that content before
-the events are appended, so a later genuine `read` of the file cannot
-contradict what the model already saw.
+> **Self-contained preset note.** `preset/agent.cordis.yml` keeps the
+> persona `complete: true`. The harness then enforces that complete section
+> after the waterfall, so in THAT preset the final system prompt is the
+> minimal persona sentence alone (the two-tool statement is not visible).
+> This is intentional: the tools the model actually uses are the full request
+> schemas, and the old minimal tool names are not part of the real callable
+> surface. When bundled onto an ordinary preset WITHOUT a complete section,
+> the two-tool statement does appear.
+
+The guide file is **really written to disk** — one shared
+`.dsh/agent-dev-guide.md`, overwritten on every fresh seed — with exactly the
+content the virtual result shows. The read result is durable in the session
+log, so once seeded the transcript no longer depends on the file.
 
 ## Why
 
@@ -195,10 +209,11 @@ Requirements for the anchoring to work as designed:
 | `elevationSource` | `auto` | `auto`: capture non-persona prompt sections of the assembly (fallback to `elevationPrompt`); `config`: use `elevationPrompt` only; `none`: notice only. |
 | `elevationNotice` | `When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:` | The fixed framing sentence. |
 | `personaSection` | `deployment:persona` | Section name excluded from auto-capture (matches the harness's own persona registration in dsh-system-prompt). |
-| `virtualUserTemplate` | pre-sampled (see `lib/runtime.js`) | Virtual user message template; `{path}` is replaced with the project-root-relative guide path (`.dsh/<id>/agent-dev-guide.md`). Default is verbatim text from the best modeltest-fingerprint round. |
+| `virtualUserTemplate` | pre-sampled (see `lib/runtime.js`) | Virtual user message template; `{path}` is replaced with the project-root-relative guide path (`.dsh/agent-dev-guide.md`). Default is verbatim text from the best modeltest-fingerprint round. |
 | `virtualReasoningTemplate` | pre-sampled (see `lib/runtime.js`) | Virtual assistant reasoning text; default is the verbatim minimal "We need" first block from the same round. |
 | `virtualToolName` | `bash` | Tool the virtual assistant calls (the minimal preset's real surface is `bash` + `str_replace_editor` — there is no `read` tool). |
 | `virtualCommandTemplate` | `pwd && cat {path}` | Bash command whose fabricated stdout becomes the tool result. |
+| `dynamicSections` | `['plan:policy']` | Whitelist of dynamic system-prompt sections preserved by the minimal replacement. A section is appended AFTER the minimal persona/tools sections when its rendered text is non-empty (e.g. plan-mode guidance while plan mode is active). |
 | `injectProjectInstructions` | `true` | **Inert (backward compat).** Workspace instructions come from the harness's `dsh-agent-instructions` after the user's real first message. |
 | `maxInstructionsBytes` | `65536` | **Inert (backward compat).** See `injectProjectInstructions`. |
 | `guard.enabled` | `true` | Environment self-check switch; `false` force-loads the plugin. |
@@ -207,13 +222,13 @@ Requirements for the anchoring to work as designed:
 
 Export the session JSONL and inspect the events of the first turn:
 
-- a `user/message` (the read request, source `plugin`), an
+- a `user/message` whose source is `{ kind: 'user', form: 'anchor-seed' }`, an
   `assistant/message` with a `reasoning` block plus one `tool-call`, a
   `tool/call`, and a `tool/result` whose content is the guide file;
 - the `tool/result` carries `surfaceOp: append` and
   `sourceEventSeqs: [<tool/call seq>]`;
-- the real file `.dsh/<session id>/agent-dev-guide.md` exists with the same
-  content as the virtual result;
+- the real file `.dsh/agent-dev-guide.md` exists with the same content as the
+  virtual result body;
 - the first `request/header` already contains the FULL tool catalog.
 
 Run the zero-dependency tests:
@@ -227,21 +242,31 @@ npm test
 - The seed is appended inside the first `system-prompt/assemble` waterfall,
   before `buildRequest` derives the request messages — the first real request
   always includes the virtual turn.
-- Top-level fresh sessions only: subagents (`delegationDepth > 0`) are never
-  seeded; sessions that already produced a `user/message` are never re-seeded
-  (this also makes resume/reload idempotent, because the seeded events are
-  durable).
-- The virtual `tool/result` is rendered byte-for-byte like `dsh-tool-fs`
-  `read` output (`<path>` envelope, line numbers, `(End of file - total N
-  lines)`), and the guide file on disk is identical, so the transcript cannot
-  be contradicted by a real read.
-- Every failure path degrades: a guard failure, an unwritable guide path, or a
-  session that rejects an event logs one warning and leaves the session
-  running WITHOUT the anchor. A plugin hook never throws into the harness.
+- Top-level fresh sessions only: subagents (`delegationDepth > 0` or
+  `origin: 'subagent'`) are never seeded; sessions that already produced a
+  real `user/message` are never re-seeded. Seeded state is detected from the
+  DURABLE log, so resume/reload keeps the minimal system replacement, and a
+  partially written seed is completed on the next assembly instead of
+  re-seeding.
+- The virtual `tool/result` is the raw stdout of `pwd && cat <guide>`
+  (`<cwd>\n<content>` — bash, not a read-tool envelope). The shared guide file
+  is overwritten on each fresh seed; the virtual read result is durable in the
+  session log.
+- The session-title service would title the session from the virtual user
+  message (the built-in first-prompt provider always picks the first user
+  message). Once a title event citing the virtual message is observed after
+  the real first message, the plugin corrects it: when a title provider is
+  reachable it generates a provider title from the real message; otherwise —
+  and as the deterministic fallback — it appends a corrected fallback title
+  derived from the real message.
+- Every failure path degrades: a guard failure, an unwritable guide path, a
+  missing model route, or a session that rejects an event logs one warning
+  and leaves the session running WITHOUT the anchor. A plugin hook never
+  throws into the harness.
 - The plugin performs no network requests and adds no telemetry.
 - The plugin has the same trust level as shell access — it writes one file
-  into the project (`.dsh/<session id>/agent-dev-guide.md`). Add `.dsh/` to
-  your project's `.gitignore`.
+  into the project (`.dsh/agent-dev-guide.md`). Add `.dsh/` to your project's
+  `.gitignore`.
 
 ## Known limitations
 
@@ -256,9 +281,9 @@ npm test
   result format consistent with what that command would actually print.
 - The elevation lives in the first tool result; long sessions with compaction
   may summarize or prune it (the same constraint anchored-standard had for its
-  one-time promotion). The tool catalog stays constant, so the request-prefix
-  cache changes once (between the pre-seed and post-seed prefixes of the first
-  request).
+  one-time promotion). The request's tool schemas stay constant, so the
+  request-prefix cache changes once (between the pre-seed and post-seed
+  prefixes of the first request).
 - n=1 empirical validation on your model/setup is required; the published
   98/99 evidence is for DeepSeek V4 Pro on one frozen task.
 

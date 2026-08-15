@@ -27,6 +27,14 @@ import { join } from 'node:path'
 /** Cordis plugin name used by loader diagnostics and message source markers. */
 export const PLUGIN_NAME = 'anchor-seed'
 
+/**
+ * Durable source marker on the virtual user message. Keeping `kind: 'user'`
+ * is what makes the trajectory render it as a real user message; the extra
+ * `form` field is what lets this plugin (and auditors) distinguish the
+ * synthetic message from a real human message in the durable log.
+ */
+export const ANCHOR_USER_SOURCE_FORM = 'anchor-seed'
+
 /** Default elevation notice placed at the top of the guide file. */
 export const DEFAULT_ELEVATION_NOTICE =
   "When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; " +
@@ -76,19 +84,18 @@ export const DEFAULT_VIRTUAL_REASONING_TEMPLATE =
  */
 export const DEFAULT_VIRTUAL_COMMAND_TEMPLATE = 'pwd && cat {path}'
 
-/** Project-root-relative guide directory for one session. */
-export function guideRelativeDir(sessionId) {
-  return `.dsh/${sessionId}`
-}
-
-/** Project-root-relative guide file path for one session. */
-export function guideRelativePath(sessionId) {
-  return `.dsh/${sessionId}/agent-dev-guide.md`
+/**
+ * Project-root-relative guide file path. ONE shared file directly under
+ * `.dsh/`: each fresh seed overwrites it, and the virtual turn's result is
+ * durable in the session log, so per-session directories are unnecessary.
+ */
+export function guideRelativePath() {
+  return '.dsh/agent-dev-guide.md'
 }
 
 /** Absolute guide path for one session under a working directory. */
-export function guideAbsolutePath(cwd, sessionId) {
-  return join(cwd, guideRelativePath(sessionId))
+export function guideAbsolutePath(cwd) {
+  return join(cwd, guideRelativePath())
 }
 
 /** Replace every `{path}` placeholder in a template with the guide path. */
@@ -142,10 +149,10 @@ export const MINIMAL_PERSONA = 'You are a helpful software engineer assistant.'
  *      preset, and the trajectory condition that makes the model open with
  *      "We need …" (modeltest trigger experiments);
  *   2. a tool-catalog statement that mirrors what the minimal preset's two
- *      schemas told the model (the schemas here stay FULL — 28 tools — so the
- *      statement is what keeps the first request inside the minimal
- *      two-tool cognition; the full catalog is revealed by the guide's tool
- *      list in the virtual turn's result).
+ *      schemas told the model (the request schemas here deliberately stay
+ *      FULL; the statement is what keeps the first request inside the minimal
+ *      two-tool cognition, while the model's real capability set comes from
+ *      the request's own tool schemas).
  *
  * @returns the ordered replacement sections for `assembly.sections`.
  */
@@ -165,22 +172,6 @@ export function buildMinimalSections({ minimalPersona = MINIMAL_PERSONA, toolNam
         'Work autonomously, completing the task with these tools as needed.',
     },
   ]
-}
-
-/**
- * Render the full tool catalog as text for the guide file: every tool's name
- * and description, so the virtual turn's bash result reveals the complete
- * capability set the model is actually allowed to call (the schemas stay full
- * on every request). Mirrors the schema order for stable rendering.
- */
-export function buildToolCatalogText(tools = []) {
-  if (!Array.isArray(tools) || tools.length === 0) return ''
-  const lines = tools.map((tool) => {
-    const name = tool?.name ?? ''
-    const description = tool?.description ?? ''
-    return description.length > 0 ? `- ${name}: ${description}` : `- ${name}`
-  })
-  return `The full tool catalog available in this session:\n${lines.join('\n')}`
 }
 
 /**
@@ -210,15 +201,6 @@ export function createToolResultMessage({ callId, content, isError = false }) {
   })
 }
 
-/** The injected-instructions user message (source marks it as plugin-owned). */
-export function createInstructionsMessage(text) {
-  return createMessage({
-    role: 'user',
-    content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_NAME, form: 'instructions' },
-  })
-}
-
 /**
  * Build the ordered synthetic event list for the virtual anchor turn.
  *
@@ -243,7 +225,7 @@ export function createInstructionsMessage(text) {
  * and before the user's real message.
  *
  * @param command - the already-interpolated bash command (e.g. `pwd && cat
- *   .dsh/<id>/agent-dev-guide.md`).
+ *   .dsh/agent-dev-guide.md`).
  * @param resultText - the fabricated raw stdout for that command.
  * @param toolName - the tool the virtual assistant calls (default `bash`).
  */
@@ -268,10 +250,9 @@ export function buildVirtualTurn({
         content: [{ type: 'text', text: userText }],
         // source.kind 'user' makes the trajectory UI render this as a real
         // user message (opens a turn, blue "User" cell) instead of a green
-        // context injection. The session-title service keys on the same field
-        // and will pick this message for the fallback title — the caller must
-        // compensate (e.g. ensure a real user message follows promptly).
-        source: { kind: 'user' },
+        // context injection. The `form` marker keeps the synthetic message
+        // distinguishable in the durable log and lets title recovery skip it.
+        source: { kind: 'user', form: ANCHOR_USER_SOURCE_FORM },
       }),
       opts: { surfaceOp: 'append' },
     },
@@ -318,97 +299,248 @@ function randomCallSuffix() {
   return out
 }
 
+/** Concatenate the text blocks of a message-shaped object. */
+function messageText(message) {
+  return (message?.content ?? [])
+    .filter((block) => block?.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+}
+
+/** The first tool-call block id of an assistant message, when present. */
+function assistantCallId(message) {
+  return message?.content?.find((block) => block?.type === 'tool-call')?.id
+}
+
 /**
- * Append the synthetic events to a session log, wiring the `tool/result`
- * `sourceEventSeqs` to the `tool/call` event's real seq.
+ * Whether a durable `user/message` event is the virtual anchor request.
+ * New seeds carry the explicit `form` marker; pre-marker seeds are recognized
+ * by their exact `{kind: 'user'}` source (real web messages add `rpcId`) and
+ * the guide path in their text.
+ */
+function isAnchorUserEvent(event, displayPath) {
+  if (!event || event.type !== 'user/message') return false
+  const source = event.data?.source
+  if (source?.form === ANCHOR_USER_SOURCE_FORM) return true
+  return (
+    typeof source === 'object' && source !== null &&
+    source.kind === 'user' && Object.keys(source).length === 1 &&
+    typeof displayPath === 'string' && messageText(event.data).includes(displayPath)
+  )
+}
+
+/**
+ * Inspect the durable log for the virtual anchor turn.
+ *
+ * @returns
+ *   - `userPresent` / `assistantPresent` / `callSeq` / `resultPresent` — which
+ *     parts of the four-event sequence already exist;
+ *   - `existingCallId` — the call id already logged, when determinable;
+ *   - `complete` — the whole turn is present and linked;
+ *   - `partial` — the turn started but is missing a later event.
+ */
+export function inspectAnchorTurn(session, displayPath) {
+  const events = Array.isArray(session?.events) ? session.events : []
+  let userPresent = false
+  let assistantPresent = false
+  let callSeq
+  let resultPresent = false
+  let existingCallId
+  for (const event of events) {
+    if (isAnchorUserEvent(event, displayPath)) userPresent = true
+    if (!userPresent) continue
+    if (event.type === 'assistant/message' && event.data?.turn === 1 && event.data?.step === 0) {
+      const id = assistantCallId(event.data.message)
+      if (typeof id === 'string' && id.length > 0) {
+        existingCallId ??= id
+        assistantPresent = true
+      }
+      continue
+    }
+    if (event.type === 'tool/call' && event.data?.turn === 1 && event.data?.step === 0) {
+      const id = event.data.callId
+      if (typeof id === 'string' && (existingCallId === undefined || id === existingCallId)) {
+        existingCallId ??= id
+        callSeq = event.seq
+      }
+      continue
+    }
+    if (event.type === 'tool/result' && event.data?.turn === 1 && event.data?.step === 0) {
+      const id = event.data.message?.source?.callId
+      if (typeof id === 'string' && (existingCallId === undefined || id === existingCallId)) {
+        resultPresent = true
+      }
+    }
+  }
+  const complete = userPresent && assistantPresent && callSeq !== undefined && resultPresent
+  return {
+    userPresent,
+    assistantPresent,
+    callSeq,
+    resultPresent,
+    existingCallId,
+    complete,
+    partial: userPresent && !complete,
+  }
+}
+
+/** Whether a top-level agent already has a COMPLETE durable anchor turn. */
+export function isAnchorSeeded(agent) {
+  return isTopLevelAgent(agent) && inspectAnchorTurn(agent.session, guideRelativePath()).complete
+}
+
+/** Whether a top-level agent has a durable anchor turn that started but did not finish. */
+export function hasPartialAnchorTurn(agent) {
+  return isTopLevelAgent(agent) && inspectAnchorTurn(agent.session, guideRelativePath()).partial
+}
+
+/** Clone event tuples with every tool-call reference rewritten to `callId`. */
+export function withAnchorCallId(events, callId) {
+  const cloned = structuredClone(events)
+  for (const tuple of cloned) {
+    if (tuple.type === 'assistant/message') {
+      const block = tuple.data.message?.content?.find((item) => item.type === 'tool-call')
+      if (block) block.id = callId
+    } else if (tuple.type === 'tool/call') {
+      tuple.data.callId = callId
+    } else if (tuple.type === 'tool/result') {
+      if (tuple.data.message?.source) tuple.data.message.source.callId = callId
+      const block = tuple.data.message?.content?.find((item) => item.type === 'tool-result')
+      if (block) block.toolCallId = callId
+    }
+  }
+  return cloned
+}
+
+/** The first tool-call block id across the synthetic event list. */
+export function anchorCallIdFromEvents(events) {
+  return assistantCallId(events?.[1]?.data?.message)
+}
+
+/**
+ * Validate the synthetic turn against the CURRENT harness event/message
+ * contract BEFORE anything is appended. This turns an upstream shape change
+ * into a clean "session continues without the anchor" warning instead of a
+ * partially written transcript.
+ */
+export function assertVirtualTurnAppendable(events) {
+  const fail = (message) => {
+    throw new Error(`${PLUGIN_NAME}: invalid virtual turn — ${message}`)
+  }
+  if (!Array.isArray(events) || events.length !== 4) fail('expected exactly 4 event tuples')
+  const [user, assistant, call, result] = events
+
+  if (user?.type !== 'user/message' || user?.opts?.surfaceOp !== 'append') {
+    fail('user/message must be first and carry surfaceOp append')
+  }
+  const userMessage = user.data
+  if (userMessage?.role !== 'user' || !Array.isArray(userMessage?.content) || messageText(userMessage).length === 0) {
+    fail('user/message must be a non-empty user-role message')
+  }
+  if (userMessage?.source?.kind !== 'user' || userMessage?.source?.form !== ANCHOR_USER_SOURCE_FORM) {
+    fail('user/message source must be kind user with the anchor form marker')
+  }
+
+  if (assistant?.type !== 'assistant/message' || assistant?.opts?.surfaceOp !== 'append') {
+    fail('assistant/message must be second and carry surfaceOp append')
+  }
+  const assistantMessage = assistant.data?.message
+  if (assistant?.data?.turn !== 1 || assistant?.data?.step !== 0) fail('assistant/message must carry turn 1 step 0')
+  if (assistantMessage?.role !== 'assistant' || assistantMessage?.source?.kind !== 'model') {
+    fail('assistant/message must be a model-sourced assistant-role message')
+  }
+  if (typeof assistantMessage?.source?.provider !== 'string' || assistantMessage.source.provider.length === 0 ||
+      typeof assistantMessage?.source?.model !== 'string' || assistantMessage.source.model.length === 0) {
+    fail('assistant/message requires non-empty provider and model (restore rejects empty routes)')
+  }
+  const reasoning = assistantMessage?.content?.find((block) => block?.type === 'reasoning')
+  const toolBlock = assistantMessage?.content?.find((block) => block?.type === 'tool-call')
+  if (typeof reasoning?.text !== 'string' || reasoning.text.length === 0) fail('assistant/message requires a reasoning block')
+  if (!toolBlock || typeof toolBlock.id !== 'string' || typeof toolBlock.name !== 'string' || typeof toolBlock.arguments !== 'string') {
+    fail('assistant/message requires one well-formed tool-call block')
+  }
+
+  if (call?.type !== 'tool/call') fail('tool/call must be third')
+  if (call?.data?.turn !== 1 || call?.data?.step !== 0) fail('tool/call must carry turn 1 step 0')
+  if (call.data?.callId !== toolBlock.id || call.data?.name !== toolBlock.name || call.data?.arguments !== toolBlock.arguments) {
+    fail('tool/call must match the assistant tool-call block')
+  }
+
+  if (result?.type !== 'tool/result' || result?.opts !== undefined) {
+    fail('tool/result must be fourth; its surface metadata is wired at append time')
+  }
+  if (result?.data?.turn !== 1 || result?.data?.step !== 0) fail('tool/result must carry turn 1 step 0')
+  const resultMessage = result.data?.message
+  const resultBlock = resultMessage?.content?.[0]
+  if (resultMessage?.role !== 'user' || resultMessage?.source?.kind !== 'tool' || resultMessage?.source?.callId !== toolBlock.id) {
+    fail('tool/result must be a tool-sourced user-role message for the same call')
+  }
+  if (resultMessage?.content?.length !== 1 || resultBlock?.type !== 'tool-result' || resultBlock?.toolCallId !== toolBlock.id ||
+      resultBlock?.isError !== false || !Array.isArray(resultBlock?.content) || messageText(resultBlock).length === 0) {
+    fail('tool/result requires one non-error tool-result block for the same call')
+  }
+}
+
+/**
+ * Append the synthetic anchor turn, IDEMPOTENTLY.
+ *
+ * A fresh session gets all four events. A session that already contains a
+ * complete turn is left untouched. A session with a PARTIAL turn (a crash or
+ * rejected append between events) gets exactly the missing tail events, so a
+ * later assembly or a resume can finish what an interrupted seed started
+ * instead of leaving an orphan user message in the transcript.
  *
  * @param session - anything with a `session.append(type, data, opts?)` that
  *   returns the logged event (the harness `Session` does; tests fake it).
- * @param events - tuples from `buildVirtualTurn` (plus optional extra
- *   `user/message` tuples, e.g. the injected-instructions message).
- * @returns the logged events in append order.
- * @throws when a `tool/result` appears without a preceding `tool/call`, or
- *   when the session rejects an event; a partial seed is possible but the
- *   tool pair is appended atomically enough that the caller can treat a throw
- *   as "session degraded" (index.js logs and stops, never rethrows).
+ * @param events - the four tuples from `buildVirtualTurn`.
+ * @param displayPath - project-relative guide path (legacy marker detection).
+ * @returns the events appended this call, in append order.
  */
-export function appendVirtualTurn(session, events) {
+export function appendVirtualTurn(session, events, displayPath) {
+  assertVirtualTurnAppendable(events)
+  if (typeof session?.append !== 'function') throw new Error(`${PLUGIN_NAME}: session.append unavailable — anchor not seeded`)
+  const expectedCallId = anchorCallIdFromEvents(events)
+  const state = inspectAnchorTurn(session, displayPath)
+  if (state.complete) return []
+  let work = events
+  if (state.assistantPresent && typeof state.existingCallId === 'string' && state.existingCallId !== expectedCallId) {
+    work = withAnchorCallId(events, state.existingCallId)
+  }
   const appended = []
-  let callSeq
-  for (const event of events) {
-    if (event.type === 'tool/call') {
-      const logged = session.append(event.type, event.data)
-      callSeq = logged.seq
-      appended.push(logged)
-      continue
-    }
-    let opts
-    if (event.type === 'tool/result') {
-      if (callSeq === undefined) throw new Error(`${PLUGIN_NAME}: tool/result without a preceding tool/call`)
-      opts = { surfaceOp: 'append', sourceEventSeqs: [callSeq] }
-    } else if (event.opts) {
-      opts = event.opts
-    }
-    appended.push(session.append(event.type, event.data, opts))
+  if (!state.userPresent) appended.push(session.append(work[0].type, work[0].data, work[0].opts))
+  if (!state.assistantPresent) appended.push(session.append(work[1].type, work[1].data, work[1].opts))
+  let callSeq = state.callSeq
+  if (callSeq === undefined) {
+    const logged = session.append(work[2].type, work[2].data)
+    callSeq = logged?.seq
+    appended.push(logged)
+  }
+  if (!state.resultPresent) {
+    if (callSeq === undefined) throw new Error(`${PLUGIN_NAME}: tool/result without a preceding tool/call`)
+    appended.push(session.append(work[3].type, work[3].data, { surfaceOp: 'append', sourceEventSeqs: [callSeq] }))
   }
   return appended
 }
 
 /**
+ * Whether this agent is a top-level session (never a subagent). Subagent
+ * headers carry `origin: 'subagent'` and `delegationDepth > 0`; checking both
+ * keeps a malformed or legacy subagent header from being seeded.
+ */
+export function isTopLevelAgent(agent) {
+  if (!agent?.session) return false
+  const header = agent.session.header ?? {}
+  if ((header.delegationDepth ?? 0) > 0) return false
+  return header.origin !== 'subagent'
+}
+
+/**
  * Whether this agent should receive the anchor seed: a TOP-LEVEL session that
- * has no user message yet. Subagents (delegationDepth > 0) are never seeded;
- * sessions that already produced a user message (real or seeded) are not
- * seeded again, which also makes resume/reload idempotent because the seeded
- * events are durable.
+ * has no user message yet. Sessions that already produced a user message are
+ * not seeded from scratch, but a PARTIAL anchor is still completed by
+ * `appendVirtualTurn` (see `hasPartialAnchorTurn`).
  */
 export function isFreshTopLevelAgent(agent) {
-  if (!agent?.session) return false
-  if ((agent.session.header?.delegationDepth ?? 0) > 0) return false
+  if (!isTopLevelAgent(agent)) return false
   return !agent.session.events.some((event) => event.type === 'user/message')
-}
-
-/** Candidate instruction files, read from the session working directory. */
-export const INSTRUCTION_FILE_CANDIDATES = ['AGENTS.md', 'CLAUDE.md']
-
-/**
- * Read AGENTS.md/CLAUDE.md from `cwd`. Missing files are skipped silently;
- * any other read error is skipped too (the seed must never fail a session
- * because of an unreadable instructions file).
- * @param readFile - `fs/promises.readFile` (injectable for tests).
- */
-export async function readProjectInstructions(cwd, readFile) {
-  const parts = []
-  for (const name of INSTRUCTION_FILE_CANDIDATES) {
-    const path = join(cwd, name)
-    try {
-      const content = await readFile(path, 'utf8')
-      parts.push({ path, content })
-    } catch {
-      // ENOENT or unreadable: skip this candidate.
-    }
-  }
-  return parts
-}
-
-/**
- * Render the injected-instructions user message text, mirroring the
- * agent-instructions `<system-reminder>` framing so the model reads it as the
- * same kind of workspace guidance. Empty when no instruction files exist.
- * Truncated to `maxBytes` with an explicit marker (like agent-instructions).
- */
-export function buildInstructionsText(parts, maxBytes = 65536) {
-  if (parts.length === 0) return ''
-  const intro =
-    'The following workspace instructions may be relevant to your work. Use them as guidance when applicable. ' +
-    'More specific instructions take precedence over broader ones. They do not override system, developer, or direct user instructions.'
-  const body = parts
-    .map(({ path, content }) => `Instructions from: ${path}\n\n${content}`)
-    .join('\n\n')
-  const full = `<system-reminder>\n${intro}\n\n${body}\n</system-reminder>`
-  const bytes = Buffer.byteLength(full, 'utf8')
-  if (bytes <= maxBytes) return full
-  const marker = `\n\nWorkspace instruction budget ${maxBytes} bytes: truncated.`
-  const budget = Math.max(0, maxBytes - Buffer.byteLength(marker, 'utf8'))
-  const truncated = Buffer.from(full, 'utf8').subarray(0, budget).toString('utf8')
-  return `${truncated}${marker}`
 }
