@@ -53,12 +53,15 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 5. **No `turn/start`/`step/start`/`turn/end` for the virtual turn.** The loop
    derives its turn number from `turn/start` at agent construction; synthetic
    boundary events could collide with the real turn numbering. Message events
-   are all the surface needs. The virtual messages DO carry `turn: 0,
+   are all the surface needs. The virtual messages DO carry `turn: 1,
    step: 0`: the trajectory UI keys the assistant-step lifecycle on
    `${turn}:${step}`, so stamping the virtual turn `1:1` made its
    `assistant/message` arrive as an "update" before the real `step/start`
    ("received an update before its start Match") and broke the trajectory
-   render. Turn 0 is the UI's prologue bucket, merged ahead of turn 1.
+   render; step 0 avoids that key. Turn 1 (not 0) keeps the Initial System
+   Prompt (`firstVisibleTurn`) ahead of the virtual prelude. The virtual
+   user message uses `source.kind: 'user'` so the UI renders it as a real
+   user message (opens a turn).
 6. **The plugin replaces the system prompt itself — no preset precondition.**
    On every `system-prompt/assemble` of a top-level session, the returned
    `assembly.sections` are replaced with the minimal persona sentence (byte-

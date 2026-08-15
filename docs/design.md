@@ -94,11 +94,14 @@ result 揭示给模型。替换幂等且全局:每次 assemble 重放,持久化�
     `source.kind === 'agent-instructions'` 的消息,转录中恰好只有一条 instructions
     消息、位于虚拟轮与真实首条消息之间。要增量更新则 `injectProjectInstructions:
     false` 并挂回官方插件。
-6. **虚拟轮消息用 `turn: 0, step: 0`(而非 1:1)**:轨迹 UI 的 assistant-step 生命周期
+6. **虚拟轮消息用 `turn: 1, step: 0`(而非 1:1)**:轨迹 UI 的 assistant-step 生命周期
     以 `${turn}:${step}` 为 id;虚拟轮打 1:1 会让它的 `assistant/message` 以 "update"
     先于真实 `step/start` 到达,触发 "received an update before its start Match"
-    硬断言、轨迹渲染异常(2026-08-15 实测)。turn 0 是 UI 的 prologue 桶,会合并显示
-    在 turn 1 之前——正好是"虚拟前奏"的预期位置。
+    硬断言、轨迹渲染异常(2026-08-15 实测)。step 0 避开该 id;turn 用 1(而非 0)让
+    `firstVisibleTurn` 把 Initial System Prompt 定位在虚拟轮之前(2026-08-15 用户
+    指出:turn 0 使 system 显示在 TOOL call 之后)。虚拟 user 的 `source.kind` 为
+    'user',轨迹 UI 将其渲染为真实用户消息(opensTurn)。已知代价:会话标题会基于
+    虚拟文本(与真实 user 共用 `source.kind==='user'` 判定),待后续修复。
 7. **fail-safe**:guard 自检(参照 dsh-read-image)、写盘失败、append 失败均降级为
     "一次告警 + 会话无锚定继续",绝不向 harness 抛错。
 

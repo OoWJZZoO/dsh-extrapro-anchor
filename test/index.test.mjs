@@ -187,7 +187,7 @@ test('injectProjectInstructions false skips AGENTS.md injection', async () => {
   }
 })
 
-test('virtual turn events carry turn 0 step 0 (no collision with the real first step)', async () => {
+test('virtual turn events carry turn 1 step 0 (no collision with the real first step)', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
     const { ctx, state } = makeCtx({ cwd })
@@ -201,9 +201,14 @@ test('virtual turn events carry turn 0 step 0 (no collision with the real first 
     // `${turn}:${step}`; stamping the virtual turn 1:1 made its
     // assistant/message arrive as an "update" before the real step/start
     // ("received an update before its start Match"), breaking the render.
-    assert.deepEqual({ turn: assistant.data.turn, step: assistant.data.step }, { turn: 0, step: 0 })
-    assert.deepEqual({ turn: call.data.turn, step: call.data.step }, { turn: 0, step: 0 })
-    assert.deepEqual({ turn: result.data.turn, step: result.data.step }, { turn: 0, step: 0 })
+    // Turn 1 (not 0) so the Initial System Prompt (firstVisibleTurn) lands
+    // BEFORE the virtual prelude; step 0 keeps it off the real 1:1 key.
+    assert.deepEqual({ turn: assistant.data.turn, step: assistant.data.step }, { turn: 1, step: 0 })
+    assert.deepEqual({ turn: call.data.turn, step: call.data.step }, { turn: 1, step: 0 })
+    assert.deepEqual({ turn: result.data.turn, step: result.data.step }, { turn: 1, step: 0 })
+    // The virtual user message is rendered as a real user message (opensTurn)
+    const user = session.events.find((e) => e.type === 'user/message')
+    assert.equal(user.data.source.kind, 'user')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }

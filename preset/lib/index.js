@@ -36,9 +36,11 @@
  * the loop derives the real turn number from `turn/start` events at agent
  * construction, so synthetic boundary events could collide with the real
  * turn's numbering; message events are all the surface needs. The virtual
- * messages carry `turn: 0, step: 0` so the trajectory UI treats them as the
- * prologue (merged ahead of turn 1) instead of colliding with the real
- * `1:1` assistant-step lifecycle.
+ * messages carry `turn: 1, step: 0`: turn 1 keeps the Initial System
+ * Prompt (firstVisibleTurn) ahead of the virtual prelude, step 0 stays off
+ * the real `1:1` assistant-step lifecycle. The virtual user message is
+ * stamped `source.kind: 'user'` so the trajectory renders it as a real
+ * user message.
  *
  * Seeding happens inside the `system-prompt/assemble` waterfall of the first
  * step — after `next()` resolves, the full section list is available for the

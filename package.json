@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-anchor-seed",
   "description": "Seed every top-level session with one pre-sampled minimal-style virtual read turn whose tool result elevates the session to the preset's real prompt, then injects AGENTS.md/CLAUDE.md — deterministic trajectory anchoring without any real tool call.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

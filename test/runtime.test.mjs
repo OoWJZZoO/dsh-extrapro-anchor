@@ -73,7 +73,7 @@ test('buildVirtualTurn emits the four events in append order with matching ids',
   assert.equal(user.opts.surfaceOp, 'append')
   assert.equal(user.data.role, 'user')
   assert.equal(user.data.content[0].text, 'read it')
-  assert.equal(user.data.source.kind, 'plugin')
+  assert.equal(user.data.source.kind, 'user')
 
   assert.equal(assistant.opts.surfaceOp, 'append')
   assert.equal(assistant.data.message.role, 'assistant')

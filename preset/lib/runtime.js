@@ -230,13 +230,16 @@ export function createInstructionsMessage(text) {
  * no `read` tool in minimal), invoked with the interpolated command, and the
  * result text is the raw stdout that command would produce.
  *
- * Turn/step metadata is set to `{ turn: 0, step: 0 }` — NOT the real `1:1` the
- * agent loop will use for its first step. The trajectory UI keys the
- * assistant-step lifecycle on `${turn}:${step}`; stamping the virtual turn
- * `1:1` made its `assistant/message` arrive as an "update" before the real
- * `step/start` (`received an update before its start Match`), breaking the
- * trajectory render. Turn 0 is the UI's prologue bucket, which it merges ahead
- * of turn 1 — exactly the "virtual prelude" placement the anchor needs.
+ * Turn/step metadata is set to `{ turn: 1, step: 0 }`. The step is 0 — NOT
+ * the real `1:1` the agent loop will use — because the trajectory UI keys the
+ * assistant-step lifecycle on `${turn}:${step}`; stamping `1:1` made the
+ * virtual `assistant/message` arrive as an "update" before the real
+ * `step/start` ("received an update before its start Match"), breaking the
+ * render. The turn is 1 (not 0): `firstVisibleTurn` locates the Initial System
+ * Prompt at the first `assistant && turn > 0`, so turn 0 pushed the virtual
+ * prelude AHEAD of the system prompt in the trajectory; turn 1 keeps the
+ * virtual turn in the same turn as the real request, after the system prompt
+ * and before the user's real message.
  *
  * @param command - the already-interpolated bash command (e.g. `pwd && cat
  *   .dsh/<id>/agent-dev-guide.md`).
@@ -252,7 +255,7 @@ export function buildVirtualTurn({
   toolName = 'bash',
   provider = '',
   model = '',
-  turn = 0,
+  turn = 1,
   step = 0,
 } = {}) {
   const argumentsJson = JSON.stringify({ command })
@@ -262,7 +265,12 @@ export function buildVirtualTurn({
       data: createMessage({
         role: 'user',
         content: [{ type: 'text', text: userText }],
-        source: { kind: 'plugin', plugin: PLUGIN_NAME, form: 'notice', summary: 'anchor guide read request' },
+        // source.kind 'user' makes the trajectory UI render this as a real
+        // user message (opens a turn, blue "User" cell) instead of a green
+        // context injection. The session-title service keys on the same field
+        // and will pick this message for the fallback title — the caller must
+        // compensate (e.g. ensure a real user message follows promptly).
+        source: { kind: 'user' },
       }),
       opts: { surfaceOp: 'append' },
     },
