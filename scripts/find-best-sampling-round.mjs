@@ -24,6 +24,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 /* ── modeltest verbatim classifier ─────────────────────────────────────── */
 function count(text, regex) {
@@ -74,16 +75,48 @@ function parseArgs(argv) {
   return args
 }
 
-/** Derive the sessions store dir for a cwd: '--' + path components joined by '-'. */
-export function sessionsDirForCwd(cwd, dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')) {
-  const slug = '--' + cwd.split('/').filter(Boolean).join('-') + '--'
-  return join(dshHome, 'sessions', slug)
+/**
+ * Encode a session cwd into the durable project-directory key used by DSH's
+ * own session persistence (`dsh-session-persistence-jsonl` `projectKey`):
+ * `/`, `\`, and `:` all become `-`; characters outside the safe path-segment
+ * set are `~XXXX`-escaped; the readable part is wrapped in `--...--` and
+ * truncated to 251 chars. This keeps the scan working identically on Linux
+ * (`/home/u/proj`) and Windows (`C:\Users\u\proj`) instead of splitting on `/`
+ * only.
+ */
+export function projectKey(cwd) {
+  if (typeof cwd !== 'string' || cwd.length === 0) throw new Error('cannot encode an empty project path')
+  let readable = ''
+  let separatorRun = false
+  for (let i = 0; i < cwd.length; i += 1) {
+    const code = cwd.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch === '/' || ch === '\\' || ch === ':') {
+      if (!separatorRun) readable += '-'
+      separatorRun = true
+    } else if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      readable += ch
+      separatorRun = false
+    } else {
+      readable += '~' + code.toString(16).toUpperCase().padStart(4, '0')
+      separatorRun = false
+    }
+  }
+  return `--${(readable.replace(/^-+/, '') || 'root').slice(0, 251)}--`
 }
 
+/** Derive the sessions store dir for a cwd from the same key DSH persists with. */
+export function sessionsDirForCwd(cwd, dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')) {
+  return join(dshHome, 'sessions', projectKey(cwd))
+}
+
+/** `unzstd` binary name, including the Windows `.exe` extension when needed. */
+const UNZSTD_BIN = process.platform === 'win32' ? 'unzstd.exe' : 'unzstd'
+
 function decompress(path) {
-  const probe = spawnSync('unzstd', ['--version'], { encoding: 'utf8' })
-  if (probe.status !== 0) throw new Error('unzstd CLI not found on PATH (needed to read session.jsonl.zstd)')
-  const result = spawnSync('unzstd', ['-q', '-c', path], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 })
+  const probe = spawnSync(UNZSTD_BIN, ['--version'], { encoding: 'utf8' })
+  if (probe.status !== 0) throw new Error(`${UNZSTD_BIN} CLI not found on PATH (needed to read session.jsonl.zstd)`)
+  const result = spawnSync(UNZSTD_BIN, ['-q', '-c', path], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 })
   if (result.status !== 0) throw new Error(`unzstd failed: ${(result.stderr || '').slice(0, 200)}`)
   return result.stdout
 }
@@ -307,4 +340,8 @@ function main() {
   }
 }
 
-main()
+// Only run the CLI when this file is the entry point; importing the module for
+// `projectKey` / `sessionsDirForCwd` in tests must stay side-effect free.
+const invokedDirectly = typeof process.argv[1] === 'string'
+  && import.meta.url === pathToFileURL(process.argv[1]).href
+if (invokedDirectly) main()

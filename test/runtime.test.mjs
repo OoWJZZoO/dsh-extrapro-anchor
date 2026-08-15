@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { join } from 'node:path'
 
 import {
   PLUGIN_NAME,
@@ -68,7 +69,7 @@ test('exports a diagnostic plugin name and anchor marker', () => {
 
 test('guide path is the single shared file under .dsh', () => {
   assert.equal(guideRelativePath(), '.dsh/agent-dev-guide.md')
-  assert.equal(guideAbsolutePath('/work'), '/work/.dsh/agent-dev-guide.md')
+  assert.equal(guideAbsolutePath('/work'), join('/work', guideRelativePath()))
 })
 
 test('interpolateVariables substitutes {{known}} and keeps unknown placeholders', () => {
@@ -296,6 +297,6 @@ test('durable detection recognizes the pre-rename anchor-seed form marker', () =
 test('DEFAULT_ELEVATION_NOTICE matches the designed sentence', () => {
   assert.equal(
     DEFAULT_ELEVATION_NOTICE,
-    "When the user asks you to read this document and work according to it, it means that your Agent's operation has changed to some extent; please work according to the following more detailed prompt:",
+    "When the user asks you to read this document and work according to it, it means that **your Agent's operation has changed to some extent**; please work according to the following more detailed prompt:",
   )
 })

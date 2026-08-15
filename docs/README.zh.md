@@ -43,6 +43,13 @@ dsh plugin --profile <profile> add github:OoWJZZoO/dsh-extrapro-anchor
 cd ~/.dsh/profiles/<profile> && pnpm install
 ```
 
+Windows PowerShell 等价命令:
+
+```powershell
+cd (Join-Path $env:USERPROFILE ".dsh\profiles\<profile>")
+pnpm install
+```
+
 ```yaml
 - id: extrapro-anchor
   name: '@deepseek-ai/dsh-extrapro-anchor'
@@ -69,8 +76,9 @@ cd ~/.dsh/profiles/<profile> && pnpm install
 - 文本修改先缓存在浏览器,面板收起或下一次注入发生时落盘生效;开关即时保存。
 - 面板位置按浏览器记忆(`localStorage`)。
 
-设置持久化在 `$DSH_HOME/storages/extrapro-anchor/settings.json`。宿主插件在每次
-fresh seed 前都会重新读取,因此面板就是启用和微调锚定注入的唯一开关。
+设置持久化在 `$DSH_HOME/storages/extrapro-anchor/settings.json`(Windows
+PowerShell 下为 `$env:DSH_HOME\storages\extrapro-anchor\settings.json`)。宿主插件
+在每次 fresh seed 前都会重新读取,因此面板就是启用和微调锚定注入的唯一开关。
 
 ## 配置
 

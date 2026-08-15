@@ -50,6 +50,13 @@ Manual install: add the dependency and insert the two rows, then restart.
 cd ~/.dsh/profiles/<profile> && pnpm install
 ```
 
+Windows PowerShell equivalent:
+
+```powershell
+cd (Join-Path $env:USERPROFILE ".dsh\profiles\<profile>")
+pnpm install
+```
+
 ```yaml
 - id: extrapro-anchor
   name: '@deepseek-ai/dsh-extrapro-anchor'
@@ -81,9 +88,10 @@ until you turn it on.
   folded or when the next injection happens. The switch saves immediately.
 - Panel position is remembered per browser (`localStorage`).
 
-Settings persist to `$DSH_HOME/storages/extrapro-anchor/settings.json`. The
-host re-reads them on every fresh seed, so the panel is the single switch for
-enabling and tuning the anchor.
+Settings persist to `$DSH_HOME/storages/extrapro-anchor/settings.json`
+(Windows PowerShell: `$env:DSH_HOME\storages\extrapro-anchor\settings.json`).
+The host re-reads them on every fresh seed, so the panel is the single switch
+for enabling and tuning the anchor.
 
 ## Configuration
 
