@@ -152,6 +152,12 @@ npm test
 宿主插件;`lib/guards.js` 是 fail-safe 环境自检(dsh-read-image 模式)。
 `preset/lib/` 是构建快照——改动 `lib/` 后运行 `scripts/build-preset.sh`。
 
+采样辅助:`scripts/find-best-sampling-round.mjs` 批量扫描
+`$DSH_HOME/sessions/<cwd-slug>/`,按 modeltest minimal 指纹(逐字复用
+`modeltest/evaluator/trigger_probe` 的 `classifyReasoning`)给每个会话打分排序,
+输出最优一轮的首个 reasoning 块、用户消息与工具调用,可直接填入
+`virtualUserTemplate`/`virtualReasoningTemplate`。需要 `unzstd` CLI。
+
 ## 许可证
 
 MIT。`preset/agent.cordis.yml` 派生自 DeepSeek Harness Standard preset 与

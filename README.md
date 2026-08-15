@@ -188,6 +188,14 @@ is the Cordis host plugin; `lib/guards.js` is the fail-safe environment
 self-check (dsh-read-image pattern). `preset/lib/` is a build snapshot — run
 `scripts/build-preset.sh` after changing `lib/`.
 
+Sampling helper: `scripts/find-best-sampling-round.mjs` batch-scans
+`$DSH_HOME/sessions/<cwd-slug>/` and ranks every session against the modeltest
+minimal fingerprint (verbatim `classifyReasoning` from
+`modeltest/evaluator/trigger_probe`), then prints the best round's first
+reasoning block, user message, and tool call as ready-to-paste
+`virtualUserTemplate`/`virtualReasoningTemplate` material. Requires the
+`unzstd` CLI.
+
 ## License
 
 MIT. `preset/agent.cordis.yml` is derived from the DeepSeek Harness Standard
