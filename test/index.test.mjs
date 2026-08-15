@@ -48,7 +48,7 @@ function makeAgent({ session, provider = 'p', model = 'm' }) {
 function makeAssembly(personaText = 'You are a helpful software engineer assistant.') {
   return {
     sections: [
-      { name: 'persona', text: personaText },
+      { name: 'deployment:persona', text: personaText },
       { name: 'guide', text: 'Work in a calm, direct style. Model is {{model}} in {{cwd}}.' },
     ],
     contexts: [],
@@ -92,8 +92,11 @@ test('a fresh top-level session is seeded: events + real guide file', async () =
     assert.deepEqual(result.opts, { surfaceOp: 'append', sourceEventSeqs: [callSeq] })
     const resultText = result.data.message.content[0].content[0].text
     assert.match(resultText, new RegExp(`^${cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n`))
-    assert.match(resultText, /elevated; you may now act according to the following prompt/)
+    assert.match(resultText, /When the user asks you to read this document and work according to it/)
     assert.match(resultText, /Work in a calm, direct style\./) // auto-captured non-persona section
+    // The persona section ('deployment:persona', matching the harness's own
+    // registration) is EXCLUDED from the elevation capture
+    assert.doesNotMatch(resultText, /You are a helpful software engineer assistant\./)
     assert.doesNotMatch(resultText, /\{\{model\}\}/) // {{variables}} are interpolated in the elevation
     assert.match(resultText, /Model is deepseek-v4-pro in \/work\./)
     assert.doesNotMatch(resultText, /\(End of file - total/) // bash cat, not read
