@@ -8,13 +8,14 @@ import { apply, name, parseConfig } from '../lib/index.js'
 import { checkHostEnvironment } from '../lib/guards.js'
 
 function makeCtx({ cwd }) {
-  const state = { listener: undefined }
+  const state = { listeners: new Map() }
   const warns = []
   const errors = []
   const ctx = {
-    on(event, callback) {
-      assert.equal(event, 'system-prompt/assemble')
-      state.listener = callback
+    on(event, callback, options) {
+      const list = state.listeners.get(event) ?? []
+      list.push({ callback, options })
+      state.listeners.set(event, list)
     },
     logger: {
       warn(message) { warns.push(message) },
@@ -57,7 +58,18 @@ function makeAssembly(personaText = 'You are a helpful software engineer assista
 }
 
 async function runSeed({ ctx, state, agent, assembly = makeAssembly() }) {
-  return state.listener(assembly, { agent }, async () => assembly)
+  const listener = state.listeners.get('system-prompt/assemble')?.at(-1)?.callback
+  return listener(assembly, { agent }, async () => assembly)
+}
+
+/** Run the registered agent/pre-step listeners as a waterfall (registration order). */
+async function runPreStep({ ctx, state, payload, initial }) {
+  const listeners = (state.listeners.get('agent/pre-step') ?? []).map((entry) => entry.callback)
+  let decision = initial
+  for (const callback of listeners) {
+    decision = await callback(payload, async () => decision)
+  }
+  return decision
 }
 
 test('exports a diagnostic plugin name', () => {
@@ -67,7 +79,7 @@ test('exports a diagnostic plugin name', () => {
 test('apply registers a system-prompt/assemble listener', () => {
   const { ctx, state } = makeCtx({ cwd: '/' })
   apply(ctx, {})
-  assert.equal(typeof state.listener, 'function')
+  assert.equal(typeof state.listeners.get('system-prompt/assemble')?.at(-1)?.callback, 'function')
 })
 
 test('a fresh top-level session is seeded: events + real guide file', async () => {
@@ -175,6 +187,116 @@ test('injectProjectInstructions false skips AGENTS.md injection', async () => {
   }
 })
 
+test('virtual turn events carry turn 0 step 0 (no collision with the real first step)', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    await runSeed({ ctx, state, agent: makeAgent({ session }) })
+    const assistant = session.events.find((e) => e.type === 'assistant/message')
+    const call = session.events.find((e) => e.type === 'tool/call')
+    const result = session.events.find((e) => e.type === 'tool/result')
+    // Regression: the trajectory UI keys the assistant-step lifecycle on
+    // `${turn}:${step}`; stamping the virtual turn 1:1 made its
+    // assistant/message arrive as an "update" before the real step/start
+    // ("received an update before its start Match"), breaking the render.
+    assert.deepEqual({ turn: assistant.data.turn, step: assistant.data.step }, { turn: 0, step: 0 })
+    assert.deepEqual({ turn: call.data.turn, step: call.data.step }, { turn: 0, step: 0 })
+    assert.deepEqual({ turn: result.data.turn, step: result.data.step }, { turn: 0, step: 0 })
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('agent/pre-step drops the harness agent-instructions copy after the seed injected instructions', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    const agent = makeAgent({ session })
+    await runSeed({ ctx, state, agent })
+
+    // A realistic pre-step decision: claimed real user message plus the
+    // harness's composed agent-instructions baseline (source.kind
+    // 'agent-instructions', the dsh-base dependency's shape).
+    const claimed = [
+      { role: 'user', content: [{ type: 'text', text: 'real first message' }], source: { kind: 'user' } },
+    ]
+    const harnessCopy = {
+      role: 'user',
+      content: [{ type: 'text', text: '<system-reminder>AGENTS.md</system-reminder>' }],
+      source: { kind: 'agent-instructions', baseline: true, baselineIdentity: 'x' },
+    }
+    const runtimeCtx = {
+      role: 'user',
+      content: [{ type: 'text', text: 'runtime context' }],
+      source: { kind: 'plugin', plugin: 'runtime-context' },
+    }
+    const decision = await runPreStep({
+      ctx, state,
+      payload: { agent, messages: claimed, turn: 1, step: 1, signal: new AbortController().signal },
+      initial: { kind: 'enter', messages: [...claimed, harnessCopy, runtimeCtx] },
+    })
+    const kinds = decision.messages.map((m) => m.source.kind)
+    assert.ok(!kinds.includes('agent-instructions'), `harness copy must be dropped, got ${kinds.join(', ')}`)
+    assert.ok(kinds.includes('user'), 'real user message preserved')
+    assert.ok(kinds.includes('plugin'), 'unrelated runtime context preserved')
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('agent/pre-step keeps the harness decision when nothing was injected', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    const { ctx, state } = makeCtx({ cwd })
+    apply(ctx, {}) // no AGENTS.md/CLAUDE.md in cwd → nothing injected
+    const session = makeSession({ cwd })
+    const agent = makeAgent({ session })
+    await runSeed({ ctx, state, agent })
+
+    const harnessCopy = {
+      role: 'user',
+      content: [{ type: 'text', text: '<system-reminder>AGENTS.md</system-reminder>' }],
+      source: { kind: 'agent-instructions', baseline: true, baselineIdentity: 'x' },
+    }
+    const decision = await runPreStep({
+      ctx, state,
+      payload: { agent, messages: [], turn: 1, step: 1, signal: new AbortController().signal },
+      initial: { kind: 'enter', messages: [harnessCopy] },
+    })
+    assert.deepEqual(decision.messages, [harnessCopy], 'harness instructions survive when the seed did not inject its own')
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('agent/pre-step failure degrades with a warning, no throw', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
+  try {
+    writeFileSync(join(cwd, 'AGENTS.md'), 'project rules')
+    const { ctx, state, warns } = makeCtx({ cwd })
+    apply(ctx, {})
+    const session = makeSession({ cwd })
+    const agent = makeAgent({ session })
+    await runSeed({ ctx, state, agent })
+
+    // A decision whose messages are a non-array (or null) must not throw.
+    const decision = await runPreStep({
+      ctx, state,
+      payload: { agent, messages: [], turn: 1, step: 1, signal: new AbortController().signal },
+      initial: { kind: 'enter', messages: null },
+    })
+    assert.deepEqual(decision, { kind: 'enter', messages: null }, 'non-array messages pass through untouched')
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+
 test('a session is seeded exactly once across repeated assemblies', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'anchor-seed-'))
   try {
@@ -222,7 +344,8 @@ test('a session without session.append degrades with a warning, no throw', async
   const { ctx, state, warns } = makeCtx({ cwd: '/' })
   apply(ctx, {})
   const agent = { session: { id: 'x', header: { cwd: '/' }, events: [], append: undefined }, options: {} }
-  const result = await state.listener(makeAssembly(), { agent }, async () => makeAssembly())
+  const listener = state.listeners.get('system-prompt/assemble')?.at(-1)?.callback
+  const result = await listener(makeAssembly(), { agent }, async () => makeAssembly())
   assert.equal(result.sections.length, 2) // assembly passes through untouched
   assert.ok(warns.length >= 1)
   assert.match(warns[0], /session continues without the anchor/)
@@ -238,7 +361,8 @@ test('a file write failure degrades with a warning, no throw', async () => {
   writeFileSync(blocker, 'x')
   try {
     const agent = { session: { id: 's1', header: { cwd: blocker }, events: [], append: () => { throw new Error('unreachable') } }, options: {} }
-    const result = await state.listener(makeAssembly(), { agent }, async () => makeAssembly())
+    const listener = state.listeners.get('system-prompt/assemble')?.at(-1)?.callback
+    const result = await listener(makeAssembly(), { agent }, async () => makeAssembly())
     assert.equal(result.sections.length, 2)
     assert.ok(warns.length >= 1)
   } finally {
@@ -251,7 +375,7 @@ test('the guard failure path loads nothing (fail-safe)', async () => {
   process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL = '1'
   try {
     apply(ctx, {})
-    assert.equal(state.listener, undefined)
+    assert.equal(state.listeners.get('system-prompt/assemble'), undefined)
     assert.ok(errors.length >= 1)
     assert.match(errors[0], /self-check FAILED/)
   } finally {
@@ -264,7 +388,7 @@ test('guard.enabled false bypasses the self-check', () => {
   process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL = '1'
   try {
     apply(ctx, { guard: { enabled: false } })
-    assert.equal(typeof state.listener, 'function')
+    assert.equal(typeof state.listeners.get('system-prompt/assemble')?.at(-1)?.callback, 'function')
     assert.equal(errors.length, 0)
   } finally {
     delete process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL

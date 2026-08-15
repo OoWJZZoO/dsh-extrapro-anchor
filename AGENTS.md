@@ -53,11 +53,26 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 5. **No `turn/start`/`step/start`/`turn/end` for the virtual turn.** The loop
    derives its turn number from `turn/start` at agent construction; synthetic
    boundary events could collide with the real turn numbering. Message events
-   are all the surface needs.
+   are all the surface needs. The virtual messages DO carry `turn: 0,
+   step: 0`: the trajectory UI keys the assistant-step lifecycle on
+   `${turn}:${step}`, so stamping the virtual turn `1:1` made its
+   `assistant/message` arrive as an "update" before the real `step/start`
+   ("received an update before its start Match") and broke the trajectory
+   render. Turn 0 is the UI's prologue bucket, merged ahead of turn 1.
 6. **Minimal persona is the anchoring premise.** The composition must keep the
    persona as the minimal native prompt with `complete: true` and
    `includeRuntimeContext: false`; the preset's own guidance belongs in the
    elevation (guide file), not the system prompt.
+7. **The harness's own workspace-instructions injection is deduped.** The
+   harness bundles `@deepseek-ai/dsh-agent-instructions` (a dsh-base
+   dependency) which composes AGENTS.md/CLAUDE.md into `agent/pre-step`
+   decisions AFTER the claimed user messages — that would place a second
+   instructions message after the user's real first message. anchor-seed
+   registers `agent/pre-step` with `prepend: true` and drops
+   `source.kind === 'agent-instructions'` messages once the seed injected
+   instructions, so exactly one instructions message remains, between the
+   virtual turn and the real request. Do not also mount a separate copy of
+   `dsh-agent-instructions` (double injection).
 
 ## Working on the elevation / virtual dialogue
 

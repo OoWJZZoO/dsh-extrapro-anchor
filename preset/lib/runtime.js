@@ -171,6 +171,14 @@ export function createInstructionsMessage(text) {
  * no `read` tool in minimal), invoked with the interpolated command, and the
  * result text is the raw stdout that command would produce.
  *
+ * Turn/step metadata is set to `{ turn: 0, step: 0 }` — NOT the real `1:1` the
+ * agent loop will use for its first step. The trajectory UI keys the
+ * assistant-step lifecycle on `${turn}:${step}`; stamping the virtual turn
+ * `1:1` made its `assistant/message` arrive as an "update" before the real
+ * `step/start` (`received an update before its start Match`), breaking the
+ * trajectory render. Turn 0 is the UI's prologue bucket, which it merges ahead
+ * of turn 1 — exactly the "virtual prelude" placement the anchor needs.
+ *
  * @param command - the already-interpolated bash command (e.g. `pwd && cat
  *   .dsh/<id>/agent-dev-guide.md`).
  * @param resultText - the fabricated raw stdout for that command.
@@ -185,8 +193,8 @@ export function buildVirtualTurn({
   toolName = 'bash',
   provider = '',
   model = '',
-  turn = 1,
-  step = 1,
+  turn = 0,
+  step = 0,
 } = {}) {
   const argumentsJson = JSON.stringify({ command })
   return [

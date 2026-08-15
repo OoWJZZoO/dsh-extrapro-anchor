@@ -73,11 +73,21 @@ guide 文件在事件注入**之前**真实写盘(`<cwd>/.dsh/<sessionId>/agent-
 4. **注入点选 `system-prompt/assemble` 而非 `agent/inbox/inserted`**:前者能自动捕获
    preset 真实提示词(elevation 内容),且注入顺序严格早于 `deriveMessages`;后者只能
    用配置文本。
-5. **不挂 `dsh-agent-instructions`(示例组合)**:插件自己注入 AGENTS.md/CLAUDE.md,
-   与用户描述的顺序一致;要增量更新则 `injectProjectInstructions: false` 并挂回官方
-   插件。
-6. **fail-safe**:guard 自检(参照 dsh-read-image)、写盘失败、append 失败均降级为
-   "一次告警 + 会话无锚定继续",绝不向 harness 抛错。
+5. **去重 harness 自带的 `dsh-agent-instructions`(dsh-base 依赖)**:插件自己注入
+    AGENTS.md/CLAUDE.md(顺序与用户描述一致);harness 内置的 agent-instructions
+    会在 `agent/pre-step` 里把 AGENTS.md 再次插入到**真实用户消息之后**(2026-08-15
+    dev 轨迹实测:虚拟轮 → AGENTS.md → 用户消息 → AGENTS.md 重复)。anchor-seed 以
+    `prepend: true` 注册 `agent/pre-step`,`next()` 后丢弃
+    `source.kind === 'agent-instructions'` 的消息,转录中恰好只有一条 instructions
+    消息、位于虚拟轮与真实首条消息之间。要增量更新则 `injectProjectInstructions:
+    false` 并挂回官方插件。
+6. **虚拟轮消息用 `turn: 0, step: 0`(而非 1:1)**:轨迹 UI 的 assistant-step 生命周期
+    以 `${turn}:${step}` 为 id;虚拟轮打 1:1 会让它的 `assistant/message` 以 "update"
+    先于真实 `step/start` 到达,触发 "received an update before its start Match"
+    硬断言、轨迹渲染异常(2026-08-15 实测)。turn 0 是 UI 的 prologue 桶,会合并显示
+    在 turn 1 之前——正好是"虚拟前奏"的预期位置。
+7. **fail-safe**:guard 自检(参照 dsh-read-image)、写盘失败、append 失败均降级为
+    "一次告警 + 会话无锚定继续",绝不向 harness 抛错。
 
 ## 风险与待验证
 
