@@ -1,0 +1,16 @@
+# Reference repositories (kept locally for study, not part of this project)
+/dsh-anchored-standard/
+/modeltest/
+
+# Node
+node_modules/
+*.tgz
+
+# Plugin runtime artifacts
+.dsh/
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

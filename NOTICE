@@ -1,0 +1,19 @@
+dsh-anchor-seed includes adapted copies of:
+
+1. The DeepSeek Harness Standard agent preset, from:
+
+   https://github.com/deepseek-ai/deepseek-harness
+   commit 47f943859bef60e4160492346772ded9b24f765a
+
+2. The anchored-standard experimental preset, from:
+
+   https://github.com/xiaobright/dsh-anchored-standard
+
+Both are distributed under the MIT License:
+
+   Copyright (c) 2026 DeepSeek
+
+The full MIT permission notice is included in this repository's LICENSE file.
+
+DeepSeek and DeepSeek Harness are names of their respective owners. This
+community project is not affiliated with or endorsed by DeepSeek.

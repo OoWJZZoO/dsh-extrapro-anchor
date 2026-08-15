@@ -1,0 +1,13 @@
+# dsh bundle patch: inserts this plugin into a profile's layer stack.
+# `dsh plugin --profile <name> add <repo>` composes this patch automatically
+# (see package.json → dsh.bundle). When used as an agent PRESET instead, copy
+# the whole `preset/` directory into the user preset root and name it
+# `anchor-seed` — do not combine both installation paths.
+- insert:
+    - id: anchor-seed
+      name: '@deepseek-ai/dsh-anchor-seed'
+      config:
+        # The preset's real prompt, placed after the elevation notice inside
+        # the guide file. Leave empty (default) to auto-capture the non-persona
+        # prompt sections assembled for the session.
+        elevationPrompt: ''

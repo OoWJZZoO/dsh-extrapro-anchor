@@ -1,0 +1,37 @@
+{
+  "name": "@deepseek-ai/dsh-anchor-seed",
+  "description": "Seed every top-level session with one pre-sampled minimal-style virtual read turn whose tool result elevates the session to the preset's real prompt, then injects AGENTS.md/CLAUDE.md — deterministic trajectory anchoring without any real tool call.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "dsh-plugin",
+    "preset",
+    "anchor",
+    "trajectory",
+    "minimal"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check lib/index.js && node --check lib/runtime.js && node --check lib/guards.js && node --test"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "license": "MIT"
+}
