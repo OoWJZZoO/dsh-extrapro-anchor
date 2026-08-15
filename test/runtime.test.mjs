@@ -19,6 +19,7 @@ import {
   readProjectInstructions,
   buildInstructionsText,
   interpolatePath,
+  interpolateVariables,
 } from '../lib/runtime.js'
 
 test('exports a diagnostic plugin name', () => {
@@ -28,6 +29,12 @@ test('exports a diagnostic plugin name', () => {
 test('guide paths are per-session under .dsh', () => {
   assert.equal(guideRelativePath('abc-123'), '.dsh/abc-123/agent-dev-guide.md')
   assert.equal(guideAbsolutePath('/work', 'abc'), '/work/.dsh/abc/agent-dev-guide.md')
+})
+
+test('interpolateVariables substitutes {{known}} and keeps unknown placeholders', () => {
+  const out = interpolateVariables('Model {{model}} cwd {{cwd}} unknown {{bogus}}', { model: 'm1', cwd: '/w' })
+  assert.equal(out, 'Model m1 cwd /w unknown {{bogus}}')
+  assert.equal(interpolateVariables('no vars', undefined), 'no vars')
 })
 
 test('interpolatePath replaces every {path} placeholder', () => {

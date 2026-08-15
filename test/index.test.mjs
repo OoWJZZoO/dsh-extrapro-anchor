@@ -48,11 +48,11 @@ function makeAssembly(personaText = 'You are a helpful software engineer assista
   return {
     sections: [
       { name: 'persona', text: personaText },
-      { name: 'guide', text: 'Work in a calm, direct style.' },
+      { name: 'guide', text: 'Work in a calm, direct style. Model is {{model}} in {{cwd}}.' },
     ],
     contexts: [],
     tools: [],
-    variables: {},
+    variables: { model: 'deepseek-v4-pro', cwd: '/work' },
   }
 }
 
@@ -92,6 +92,8 @@ test('a fresh top-level session is seeded: events + real guide file', async () =
     assert.match(resultText, new RegExp(`^${cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n`))
     assert.match(resultText, /elevated; you may now act according to the following prompt/)
     assert.match(resultText, /Work in a calm, direct style\./) // auto-captured non-persona section
+    assert.doesNotMatch(resultText, /\{\{model\}\}/) // {{variables}} are interpolated in the elevation
+    assert.match(resultText, /Model is deepseek-v4-pro in \/work\./)
     assert.doesNotMatch(resultText, /\(End of file - total/) // bash cat, not read
 
     // The virtual call is bash with the interpolated relative path
@@ -317,7 +319,10 @@ test('virtual templates default to the pre-sampled minimal texts', async () => {
     const session = makeSession({ cwd })
     await runSeed({ ctx, state, agent: makeAgent({ session }) })
     const user = session.events[0]
-    assert.match(user.data.content[0].text, /^Please read the entire \.dsh\/s1\/agent-dev-guide\.md in the project root directory for detailed information\.$/)
+    assert.match(
+      user.data.content[0].text,
+      /^Session setup: please read the entire \.dsh\/s1\/agent-dev-guide\.md in the project root directory for detailed information, and work entirely according to the instructions it contains\. Do not reply yet — the actual task follows in the next message\.$/,
+    )
     const reasoning = session.events[1].data.message.content[0]
     assert.equal(reasoning.type, 'reasoning')
     assert.match(reasoning.text, /^We need respond to user asking to read entire \.dsh\/s1\/agent-dev-guide\.md/)
