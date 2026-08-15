@@ -66,7 +66,7 @@ str_replace_editor)。**工具 schemas 从不过滤**——`assembly.tools` 原�
 替换幂等且全局:每次 assemble 重放,持久化的 `request/header`
 保持在 minimal system(请求缓存友好);elevation 捕获在替换**之前**完成(seed 先跑)。
 
-**complete 段的交互(刻意设计):** 自包含 preset 的 persona 是 `complete: true`,
+**complete 段的交互(刻意设计):** 若某个 preset 的 persona 是 `complete: true`,
 harness 在 waterfall 之后会用该 complete 段覆盖返回的 sections,因此该 preset 的最终
 system 只有 minimal persona 一句,两工具声明不会出现。模型真正会调用的工具由全量
 schema 决定;旧的 minimal 工具名不属于真实可调用面,无需可见。叠加在没有 complete 段

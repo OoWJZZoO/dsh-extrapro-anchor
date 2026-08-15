@@ -24,17 +24,13 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   reference repos (modeltest trigger probe + dsh-anchored-standard tables).
 - `lib/config-remote.js` — `extraproAnchorConfig` Typert Remote bridge builder;
   receives the protocol namespace as a parameter so the module itself has no
-  external imports (preset copies must stay self-contained).
+  external imports.
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
   check must leave the plugin inert, never take the harness boot down.
 - `panel/` — companion client row: empty host half (`index.js`), nested
   `package.json` carrying the `dsh.client` manifest, and the hand-built
   `__ModuleLoader__` browser bundle `client.js` (floating overlay, switch,
   health, text editor).
-- `preset/` — self-contained example preset (minimal persona + Standard tools
-  + the extrapro-anchor row, `enabled: true` because presets ship no panel).
-  `preset/lib/` is a BUILD SNAPSHOT: after changing `lib/`, run
-  `./scripts/build-preset.sh`.
 - `test/` — `node --test`; run `npm test` (87 tests incl. the reference
   dsh-anchored-standard tree under this checkout). `lib/runtime.js`,
   `lib/settings.js`, and `lib/health.js` must stay testable with zero harness
@@ -97,10 +93,10 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
    first). Whitelisted dynamic sections (`dynamicSections`, default
    `plan:policy`) are appended AFTER the two minimal sections when their
    rendered text is non-empty; never touch runtime CONTEXT (its cache prefix
-   must stay stable). When the composition's persona is `complete: true` (as
-   in `preset/agent.cordis.yml`), the harness re-imposes that complete section
-   after the waterfall, so the final system is the persona sentence alone —
-   this is deliberate; the tools the model actually uses are the full schemas.
+   must stay stable). When the composition's persona is `complete: true`, the
+   harness re-imposes that complete section after the waterfall, so the final
+   system is the persona sentence alone — this is deliberate; the tools the
+   model actually uses are the full schemas.
 7. **Workspace instructions are the harness's job — the plugin does not
    inject AGENTS.md/CLAUDE.md.** The harness bundles
    `@deepseek-ai/dsh-agent-instructions` (a dsh-base dependency) which
@@ -141,13 +137,12 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   injection"). The host re-reads `settings.json` on mtime change before every
   fresh seed. Invalid templates (missing `{path}`) are refused by BOTH the
   client (`validDraft`) and the host (`normalizeSettingsUpdate`).
-- **Defaults are OFF for panel-capable installs.** `DEFAULT_SETTINGS.enabled`
-  is `false`; the self-contained preset (no panel) sets `enabled: true` in
-  `preset/agent.cordis.yml`. Do not "helpfully" flip either default.
+- **Defaults are OFF.** `DEFAULT_SETTINGS.enabled` is `false`; the panel switch
+  is what turns injection on for the user. Do not "helpfully" flip the default.
 - **The Remote bridge must stay optional.** `lib/index.js` resolves
   typert-protocol with `createRequire` inside try/catch — never a top-level
-  import — so the preset copy without node_modules still boots. A missing
-  bridge only disables panel saving; injection itself keeps working.
+  import — so the plugin still boots when the package is not resolvable. A
+  missing bridge only disables panel saving; injection itself keeps working.
 - **The Remote parameter name is wire-load-bearing.** The gateway derives the
   endpoint descriptor from the host method's REAL parameter names
   (`set(settings)`), so the client contribution's json parameter must declare
@@ -156,9 +151,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 - **Do not put `dsh.client` on the root package.** The host row is already
   loaded in running profiles, so its package metadata is cached and a new
   client manifest would not be re-scanned until restart; the companion row is
-  a NEW entry id and can be hot-added. The root package also must stay
-  resolvable from `$DSH_HOME/.agent-presets/extrapro-anchor/lib` for the preset
-  path.
+  a NEW entry id and can be hot-added.
 - **The panel bundle duplicates two host modules** (defaults from
   `lib/settings.js`, health classifier from `lib/health.js`) because a served
   client bundle cannot import the host half. Update all three sides together,
@@ -173,7 +166,6 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 
 ```sh
 npm run check     # syntax check lib/* + panel/* + full test run
-./scripts/build-preset.sh   # refresh preset/lib snapshot after lib/ changes
 ```
 
 Before shipping: confirm the exported JSONL of a fresh session shows exactly

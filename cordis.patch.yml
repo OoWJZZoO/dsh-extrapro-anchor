@@ -1,8 +1,7 @@
 # dsh bundle patch: inserts this plugin into a profile's layer stack.
 # `dsh plugin --profile <name> add <repo>` composes this patch automatically
-# (see package.json → dsh.bundle). When used as an agent PRESET instead, copy
-# the whole `preset/` directory into the user preset root and name it
-# `extrapro-anchor` — do not combine both installation paths.
+# (see package.json → dsh.bundle). The plugin is generic: install it onto any
+# ordinary preset and turn injection on from the floating panel.
 - insert:
     - id: extrapro-anchor
       name: '@deepseek-ai/dsh-extrapro-anchor'
@@ -17,7 +16,7 @@
     # as a NEW entry id without invalidating the cached metadata of the host
     # row above. In Web it registers the collapsible/draggable overlay: the
     # injection switch, the thinking-chain health readout, and the injected-text
-    # editor. Self-contained preset installs do not mount this row (no panel).
+    # editor.
     - id: extrapro-anchor-panel
       name: '@deepseek-ai/dsh-extrapro-anchor/panel'
       config: {}
