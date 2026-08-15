@@ -9,7 +9,7 @@ import {
   PLUGIN_NAME,
   DEFAULT_ELEVATION_NOTICE,
   buildGuideContent,
-  buildReadOutputText,
+  buildBashReadResult,
   buildVirtualTurn,
   appendVirtualTurn,
   createInstructionsMessage,
@@ -44,27 +44,19 @@ test('buildGuideContent: notice then prompt when prompt present', () => {
   assert.equal(content, 'N\n\nFollow these rules.')
 })
 
-test('buildReadOutputText renders the dsh-tool-fs format', () => {
-  const out = buildReadOutputText('/work/x.md', 'line1\nline2')
-  assert.equal(
-    out,
-    '<path>/work/x.md</path>\n<type>file</type>\n<content>\n1: line1\n2: line2\n\n(End of file - total 2 lines)\n</content>',
-  )
-})
-
-test('buildReadOutputText handles empty content', () => {
-  const out = buildReadOutputText('/work/x.md', '')
-  assert.equal(out, '<path>/work/x.md</path>\n<type>file</type>\n<content>\n(End of file - total 0 lines)\n</content>')
+test('buildBashReadResult renders raw stdout of pwd && cat', () => {
+  assert.equal(buildBashReadResult('/work', 'line1\nline2'), '/work\nline1\nline2')
+  assert.equal(buildBashReadResult('/work', ''), '/work\n')
 })
 
 test('buildVirtualTurn emits the four events in append order with matching ids', () => {
   const events = buildVirtualTurn({
-    guidePath: '/work/.dsh/s1/agent-dev-guide.md',
-    guideContent: 'N\n\nRules.',
+    command: 'pwd && cat .dsh/s1/agent-dev-guide.md',
+    resultText: '/work\nN\n\nRules.',
     userText: 'read it',
     reasoningText: 'We need to read it.',
     callId: 'call_xyz',
-    readToolName: 'read',
+    toolName: 'bash',
     provider: 'p',
     model: 'm',
   })
@@ -83,12 +75,12 @@ test('buildVirtualTurn emits the four events in append order with matching ids',
   const toolBlock = assistant.data.message.content[1]
   assert.equal(toolBlock.type, 'tool-call')
   assert.equal(toolBlock.id, 'call_xyz')
-  assert.equal(toolBlock.name, 'read')
-  assert.deepEqual(JSON.parse(toolBlock.arguments), { file_path: '/work/.dsh/s1/agent-dev-guide.md' })
+  assert.equal(toolBlock.name, 'bash')
+  assert.deepEqual(JSON.parse(toolBlock.arguments), { command: 'pwd && cat .dsh/s1/agent-dev-guide.md' })
 
   assert.equal(call.type, 'tool/call')
   assert.equal(call.data.callId, 'call_xyz')
-  assert.equal(call.data.name, 'read')
+  assert.equal(call.data.name, 'bash')
 
   // tool/result carries no opts here — appendVirtualTurn wires them
   assert.equal(result.opts, undefined)
@@ -96,7 +88,17 @@ test('buildVirtualTurn emits the four events in append order with matching ids',
   assert.equal(resultMsg.content[0].type, 'tool-result')
   assert.equal(resultMsg.content[0].toolCallId, 'call_xyz')
   assert.equal(resultMsg.content[0].isError, false)
-  assert.match(resultMsg.content[0].content[0].text, /\(End of file - total/)
+  // raw bash stdout, not a read-tool envelope
+  assert.equal(resultMsg.content[0].content[0].text, '/work\nN\n\nRules.')
+})
+
+test('buildVirtualTurn defaults to the bash tool with a call_00_ id', () => {
+  const events = buildVirtualTurn({ command: 'cat x', resultText: 'out', userText: 'u', reasoningText: 'r' })
+  const [assistant, call] = [events[1], events[2]]
+  assert.equal(assistant.data.message.content[1].name, 'bash')
+  assert.equal(call.data.name, 'bash')
+  assert.match(assistant.data.message.content[1].id, /^call_00_[A-Za-z0-9]{24}$/)
+  assert.equal(call.data.callId, assistant.data.message.content[1].id)
 })
 
 test('appendVirtualTurn wires sourceEventSeqs to the real call seq', () => {
@@ -109,8 +111,8 @@ test('appendVirtualTurn wires sourceEventSeqs to the real call seq', () => {
     },
   }
   const events = buildVirtualTurn({
-    guidePath: '/w/x.md',
-    guideContent: 'c',
+    command: 'cat .dsh/s1/agent-dev-guide.md',
+    resultText: 'out',
     userText: 'u',
     reasoningText: 'r',
     callId: 'call_a',
@@ -136,7 +138,7 @@ test('appendVirtualTurn supports an extra injected-instructions user message', (
   const appended = []
   const session = { append(type, data, opts) { const e = { type, seq: appended.length, data, opts }; appended.push(e); return e } }
   const events = [
-    ...buildVirtualTurn({ guidePath: '/w/x.md', guideContent: 'c', userText: 'u', reasoningText: 'r' }),
+    ...buildVirtualTurn({ command: 'cat x', resultText: 'out', userText: 'u', reasoningText: 'r' }),
     { type: 'user/message', data: createInstructionsMessage('rules'), opts: { surfaceOp: 'append' } },
   ]
   appendVirtualTurn(session, events)

@@ -13,8 +13,8 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 ## Layout
 
 - `lib/runtime.js` — pure, harness-free logic (event construction, guide
-  content, read-output rendering, instructions text). No Cordis imports; fully
-  unit-tested. Keep it that way.
+  content, bash-stdout result rendering, instructions text). No Cordis imports;
+  fully unit-tested. Keep it that way.
 - `lib/index.js` — the Cordis host plugin: config parsing, fail-safe guard
   wiring, the `system-prompt/assemble` hook, file writing, event injection.
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
@@ -34,11 +34,14 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 2. **Never re-seed.** `isFreshTopLevelAgent` (no prior `user/message`, top
    level only) plus the per-process WeakSet guarantee one seed per session.
    Resume/reload stays idempotent because seeded events are durable.
-3. **The transcript must be internally consistent.** The virtual
-   `tool/result` uses the byte-exact `formatReadOutput` shape of
-   `dsh-tool-fs`, and `lib/index.js` writes the guide file with identical
-   content BEFORE appending the events. A real later read must render the same
-   text.
+3. **The transcript must be internally consistent.** The virtual turn runs
+   on the minimal preset's REAL surface: `bash` (there is no `read` tool in
+   minimal), the command defaults to `pwd && cat {path}`, and the `tool/result`
+   is the exact raw stdout that command produces (`<cwd>\n<content>`).
+   `lib/index.js` writes the guide file with identical content BEFORE appending
+   the events, so a real later read/cat cannot contradict the transcript. If
+   you override `virtualCommandTemplate`, keep the fabricated result consistent
+   with that command's real output.
 4. **Surface metadata is load-bearing.** `user/message`,
    `assistant/message`, and `tool/result` are surface-eligible events:
    `Session.append` REQUIRES `surfaceOp: 'append'`, and `tool/result` also
@@ -61,10 +64,11 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 - `elevationSource: auto` captures the non-persona sections seen inside the
   `system-prompt/assemble` waterfall (before the complete-section wipe).
   Excluded section name is `personaSection` (default `persona`).
-- The default `virtualUserTemplate`/`virtualReasoningTemplate` are PLACEHOLDER
-  samples. The intended production value is a pre-sampled verbatim trajectory
-  from real minimal-mode runs; replace the defaults and document the sampling
-  source when you do.
+- The default `virtualUserTemplate`/`virtualReasoningTemplate` are verbatim
+  text from the best modeltest-fingerprint round (`session-1018c36f`, minimal
+  preset), selected by `scripts/find-best-sampling-round.mjs`; the path is
+  generalized to the `{path}` placeholder (project-root-relative). It is an
+  n=1 sample — when you swap in your own sample, document its source round.
 - `injectProjectInstructions` (default on) injects AGENTS.md/CLAUDE.md from the
   session cwd right after the elevation. Do NOT also mount
   `dsh-agent-instructions` while it is on (double injection).

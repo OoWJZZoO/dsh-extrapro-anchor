@@ -84,8 +84,10 @@ guide 文件在事件注入**之前**真实写盘(`<cwd>/.dsh/<sessionId>/agent-
 - **合成首轮 vs 真实首轮的锚定强度**:证据支持"turn1 真实生成后再扩展目录",不支持
   "合成历史"直接等价;风格延续大概率成立,强度未知——上线前需导出 JSONL 验证首块
   reasoning 是否仍为 `We/Need` 风格、`let me` 是否保持低位。
-- **默认虚拟文本是占位样例**:`virtualUserTemplate`/`virtualReasoningTemplate` 应替换
-  为真实 minimal 运行预采样原文(README 已标注)。
+- **默认虚拟文本是 n=1 真实采样**:默认值取自 modeltest 指纹最优轮
+  (`session-1018c36f`,minimal),路径泛化为 `{path}` 占位;工具调用对齐 minimal 真实
+  面(`bash` + `cat`,无 `read` 工具),工具结果为 `pwd && cat` 的真实 stdout 形态
+  (`<cwd>\n<内容>`)。若换用其他采样轮,需保持同样的自洽约束。
 - **压缩**:elevation 在首个工具结果中,长会话的 compaction 可能摘要/裁剪;工具目录
   恒定,请求前缀缓存只在首请求前后变化一次。
 - **跨题泛化**:modeltest 作者明确 n=2 同题复现不构成跨任务证明;本插件的效果需在
