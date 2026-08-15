@@ -144,7 +144,12 @@ export function apply(ctx, config) {
     const problems = [...result.problems, ...forced]
     if (problems.length > 0) {
       const logPath = writeGuardLog(problems)
-      ctx.logger.error(guardFailNotice(logPath))
+      try {
+        ctx.logger.error(guardFailNotice(logPath))
+      } catch {
+        // Even the failure path must never throw: the plugin stays inert and
+        // the full diagnostics are already in the guard log file.
+      }
       return
     }
   }

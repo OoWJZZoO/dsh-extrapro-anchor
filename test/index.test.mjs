@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { apply, name, parseConfig } from '../lib/index.js'
+import { checkHostEnvironment } from '../lib/guards.js'
 
 function makeCtx({ cwd }) {
   const state = { listener: undefined }
@@ -266,6 +267,20 @@ test('guard.enabled false bypasses the self-check', () => {
   } finally {
     delete process.env.DSH_ANCHOR_SEED_FORCE_GUARD_FAIL
   }
+})
+
+test('guard accepts the cordis callable-logger shape (function with methods)', () => {
+  // Regression: cordis v4 exposes ctx.logger as a CALLABLE function
+  // (ctx.logger() creates a named logger; ctx.logger.warn/error also exist).
+  // typeof is 'function', not 'object' — a naive probe made the plugin inert
+  // on a real boot (observed on the dev profile, 2026-08-15).
+  const ctx = {
+    on: () => {},
+    logger: Object.assign(function logger() {}, { warn: () => {}, error: () => {} }),
+  }
+  const result = checkHostEnvironment(ctx)
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.problems, [])
 })
 
 test('parseConfig validates and defaults', () => {

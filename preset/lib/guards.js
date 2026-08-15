@@ -92,6 +92,18 @@ export function checkHostEnvironment(ctx) {
   // waterfall; listener-style ctx.on callbacks with next() work for it, as
   // dsh-anchored-standard's tool-bootstrap demonstrates)
   probe('ctx.on', '插件事件机制缺失（system-prompt/assemble 钩子依赖它）', () => typeof ctx?.on === 'function')
-  probe('ctx.logger', '日志服务缺失（降级告警依赖它）', () => ctx?.logger && typeof ctx.logger === 'object')
+  // cordis exposes ctx.logger as a CALLABLE (ctx.logger() creates a named
+  // logger; ctx.logger.warn/error also exist) — typeof is 'function', not
+  // 'object'. Accept either shape as long as the warn/error methods exist.
+  probe(
+    'ctx.logger',
+    '日志服务缺失（降级告警依赖它）',
+    () => {
+      const logger = ctx?.logger
+      return (typeof logger === 'function' || typeof logger === 'object')
+        && typeof logger?.warn === 'function'
+        && typeof logger?.error === 'function'
+    },
+  )
   return { ok: problems.length === 0, problems }
 }
