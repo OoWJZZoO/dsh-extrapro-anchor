@@ -22,10 +22,8 @@ register the `bash` tool.
 Copy this prompt:
 
 ```text
-请帮我安装Git Bash并将bash注册进PATH
+Please help me install Git Bash and add bash to PATH
 ```
-
-(Translation: “Please help me install Git Bash and add bash to PATH.”)
 
 Paste it into any AI assistant that can run commands on this machine, for
 example:

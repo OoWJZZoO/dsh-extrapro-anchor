@@ -25,9 +25,7 @@ window.__ModuleLoader__.load({
 
 		// ── Windows Git Bash install-guide URLs (bilingual, chosen by the
 		//    normal locale dictionary lookup via t("gitBash.docsUrl")) ────────
-		// Keep this ref on the branch that carries docs/git-bash-install*.md;
-		// switch to "main" once the feature branch is merged.
-		const GIT_BASH_DOCS_REF = "windows-gitbash";
+		const GIT_BASH_DOCS_REF = "main";
 		const GIT_BASH_DOC_URL = Object.freeze({
 			zh: "https://github.com/OoWJZZoO/dsh-extrapro-anchor/blob/" + GIT_BASH_DOCS_REF + "/docs/git-bash-install.zh.md",
 			en: "https://github.com/OoWJZZoO/dsh-extrapro-anchor/blob/" + GIT_BASH_DOCS_REF + "/docs/git-bash-install.md",
