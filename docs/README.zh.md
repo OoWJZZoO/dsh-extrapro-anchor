@@ -87,6 +87,7 @@ PowerShell 下为 `$env:DSH_HOME\storages\extrapro-anchor\settings.json`)。宿�
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `false` | 无面板设置文件时的注入开关兜底;面板落盘值在 seed 时覆盖此值。 |
+| `enableRunInBackground` | `true` | Windows Git Bash 兼容工具:暴露 `run_in_background` 并把后台调用注册进 harness 任务运行时;`false` 时移除该参数并拒绝强制后台调用。 |
 | `elevationSource` | `auto` | `auto`:自动捕获 preset 的非 persona 提示词段;`config`:只使用 `elevationPrompt`;`none`:只保留引导句。 |
 | `elevationPrompt` | `''` | `elevationSource: config` 时使用的显式提示词。 |
 | `elevationNotice` | 内置句子 | guide 文件开头的固定引导句。 |
@@ -119,6 +120,13 @@ npm test
 
 - 默认虚拟对话来自一轮预采样(n=1);可通过面板或组合行配置替换。
 - 长会话的压缩可能摘要或裁剪首个工具结果中的 elevation。
+- Windows 上检测到 Git Bash 且注入开启时,已锚定会话会看到兼容 `bash` 工具
+  (由 `bash.exe` 驱动)来替代 `pwsh`。它支持前台与后台(`run_in_background`)
+  两种执行方式,后台任务通过 harness 的 `job_output` / `job_kill` 管理;同时
+  支持 `workdir`、`timeoutMs`、受管 `$DSH_*` 环境变量(在 harness shell-env
+  服务已加载时),以及尾部截断 + 完整输出落盘文件。它仍然不经过文件沙箱,没有
+  `sandbox_permissions` 升权。组合行设置 `enableRunInBackground: false` 可隐藏
+  后台执行。
 - 请在自己的模型/环境上验证轨迹指纹后再依赖它。
 
 ## 开发

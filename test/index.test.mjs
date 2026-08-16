@@ -462,6 +462,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
   assert.equal(defaults.elevationSource, 'auto')
   assert.equal(defaults.virtualToolName, 'bash')
   assert.equal(defaults.enabled, false) // panel posture: collapsed and OFF
+  assert.equal(defaults.enableRunInBackground, true) // official bash-tool parity
   assert.match(defaults.virtualCommandTemplate, /\{path\}/)
   assert.deepEqual(defaults.dynamicSections, ['plan:policy'])
   assert.equal(defaults.guardEnabled, true)
@@ -471,6 +472,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
     elevationSource: 'config',
     elevationPrompt: 'X',
     enabled: true,
+    enableRunInBackground: false,
     settingsPath: '/tmp/extrapro-anchor-settings.json',
     virtualToolName: 'cat',
     virtualCommandTemplate: 'cat {path}',
@@ -479,6 +481,7 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
   })
   assert.equal(custom.elevationSource, 'config')
   assert.equal(custom.enabled, true)
+  assert.equal(custom.enableRunInBackground, false)
   assert.equal(custom.settingsPath, '/tmp/extrapro-anchor-settings.json')
   assert.equal(custom.virtualToolName, 'cat')
   assert.equal(custom.virtualCommandTemplate, 'cat {path}')
@@ -486,15 +489,17 @@ test('parseConfig defaults, warns on invalid values, and reports inert instructi
   assert.equal(custom.guardEnabled, false)
   assert.deepEqual(custom.warnings, [])
 
-  const invalid = parseConfig({ elevationSource: 'bogus', virtualUserTemplate: 'no placeholder', dynamicSections: 'not-an-array', enabled: 'yes' })
+  const invalid = parseConfig({ elevationSource: 'bogus', virtualUserTemplate: 'no placeholder', dynamicSections: 'not-an-array', enabled: 'yes', enableRunInBackground: 'yes' })
   assert.equal(invalid.elevationSource, 'auto')
   assert.equal(invalid.enabled, false)
+  assert.equal(invalid.enableRunInBackground, true)
   assert.match(invalid.virtualUserTemplate, /\{path\}/)
   assert.deepEqual(invalid.dynamicSections, ['plan:policy'])
   assert.ok(invalid.warnings.some((w) => w.includes('elevationSource')))
   assert.ok(invalid.warnings.some((w) => w.includes('virtualUserTemplate')))
   assert.ok(invalid.warnings.some((w) => w.includes('dynamicSections')))
   assert.ok(invalid.warnings.some((w) => w.includes('enabled')))
+  assert.ok(invalid.warnings.some((w) => w.includes('enableRunInBackground')))
 
   const inert = parseConfig({ injectProjectInstructions: false, maxInstructionsBytes: 1234 })
   assert.ok(inert.warnings.some((w) => w.includes('inert')))

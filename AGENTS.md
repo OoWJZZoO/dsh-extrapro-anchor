@@ -27,11 +27,14 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   external imports.
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
   check must leave the plugin inert, never take the harness boot down.
+- `lib/windows-gitbash.js` — Windows Git Bash compatibility `bash` tool:
+  `bash.exe` discovery, the model-facing schema, spawn/timeout handling, and
+  per-stream tail/spill output collection. No Cordis imports; unit-tested.
 - `panel/` — companion client row: empty host half (`index.js`), nested
   `package.json` carrying the `dsh.client` manifest, and the hand-built
   `__ModuleLoader__` browser bundle `client.js` (floating overlay, switch,
   health, text editor).
-- `test/` — `node --test`; run `npm test` (87 tests incl. the reference
+- `test/` — `node --test`; run `npm test` (118 tests incl. the reference
   dsh-anchored-standard tree under this checkout). `lib/runtime.js`,
   `lib/settings.js`, and `lib/health.js` must stay testable with zero harness
   dependencies.
@@ -122,6 +125,27 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   setup:" prefix, no "Do not reply yet" trailer — 2026-08-15 user request) and
   carries `source.kind: 'user'` so the trajectory renders it as a real user
   message.
+
+## Working on the Windows Git Bash adapter
+
+- **The schema must stay honest.** The model-facing `bash` definition
+  advertises only what the backend implements: `command`, `description`,
+  `timeoutMs`, `workdir`, managed `$DSH_*` facts (only when `ctx.shellEnv`
+  exists), tail truncation with a full-output spill file, and
+  `run_in_background` (unless `enableRunInBackground: false`). Background calls
+  go through `ctx.jobs` via the lazy accessor passed in from `lib/index.js`,
+  exactly like `dsh-tool-bash`. Do not re-add `sandbox_permissions` or
+  `justification` until this backend actually runs inside the harness sandbox.
+- **`shellEnv` stays optional.** `lib/index.js` reads it through guarded
+  `ctx.get('shellEnv')` — never add `shellEnv` to `inject`; a missing service
+  must only drop the `$DSH_*` sentence, never block boot.
+- **One process handle serves both modes.** Foreground and background must
+  both use `startGitBashProcess()`; foreground adds timeout/abort on top,
+  background adapts the handle to the `ctx.jobs` producer contract
+  (`{ cancel, done, readOutput }`). Keep `done` resolving (never rejecting)
+  with `completed | killed | failed`.
+- Keep `lib/windows-gitbash.js` Cordis-free and update
+  `test/windows-gitbash.test.mjs` for every schema or executor change.
 
 ## Working on the floating panel
 
