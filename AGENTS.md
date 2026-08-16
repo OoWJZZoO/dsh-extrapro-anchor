@@ -188,11 +188,14 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 - **Windows Git Bash diagnosis rides the config bridge.** `lib/index.js`
   passes the boot-time `platform` / `gitBashInstalled` facts into
   `createExtraproAnchorConfigBridge`; the panel reads them from
-  `extraproAnchorConfig.get()`'s `host` field and, on Windows with injection
-  ON and a watch/drift chain, replaces the generic let-me warning with
-  "Git Bash 未安装" plus the locale-aware link to
-  `docs/git-bash-install*.md`. Keep `lib/config-remote.js` and
-  `panel/client.js` host-fact parsing in sync.
+  `extraproAnchorConfig.get()`'s `host` field. On Windows with injection ON
+  and Git Bash missing, the COLLAPSED pill shows "Git Bash 未安装" regardless
+  of chain health (green included), while the expanded health box keeps the
+  real let me/we counters and adds the locale-aware link to
+  `docs/git-bash-install*.md`. The hint is dismissible with "忽略" (persisted
+  in localStorage), and the flag resets once the host reports Git Bash
+  installed. Keep `lib/config-remote.js` and `panel/client.js` host-fact
+  parsing in sync.
 
 ## Verification workflow
 
