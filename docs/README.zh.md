@@ -21,6 +21,18 @@
   从不过滤,完整工具目录始终可用。
 - 子 agent 永不注入,同一会话绝不重复注入。
 
+## 平台支持
+
+- **Linux / macOS**:完整锚定效果——虚拟轮和真实 `bash` 工具都运行在原生的
+  shell 表面上。
+- **Windows**:现在可以兼容。安装 Git Bash 并使其可被 `PATH` 检测到(或通过
+  `DSH_EXTRAPRO_ANCHOR_GIT_BASH_PATH` 指定)后,已锚定会话会获得基于
+  `bash.exe` 的兼容 `bash` 工具来替代 `pwsh`,从而起到一定锚定效果。
+  **但 Windows 上的效果通常不如 Linux**,因为 Windows 表面存在差异(例如兼容
+  `bash` 工具不经过文件沙箱)。未检测到 Git Bash 时,面板会显示
+  “Git Bash 未安装”,Windows 会话继续使用 `pwsh`。安装方法见
+  [Git Bash 安装教程](git-bash-install.zh.md)。
+
 ## 安装
 
 需要 DeepSeek Harness(`dsh`)`0.1.0-rc.6` 或更高版本。
@@ -36,7 +48,7 @@ dsh plugin --profile <profile> add github:OoWJZZoO/dsh-extrapro-anchor
 
 ```json
 // ~/.dsh/profiles/<profile>/package.json → dependencies
-"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.3.0"
+"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.3.2"
 ```
 
 ```sh

@@ -27,6 +27,19 @@ affiliated with or endorsed by DeepSeek.
   catalog stays usable.
 - Subagents are never seeded, and sessions are never seeded twice.
 
+## Platform support
+
+- **Linux / macOS**: full anchoring effect — the virtual turn and the real
+  `bash` tool run on the native shell surface.
+- **Windows**: now compatible. With Git Bash installed and discoverable on
+  `PATH` (or via `DSH_EXTRAPRO_ANCHOR_GIT_BASH_PATH`), anchored sessions get a
+  compatibility `bash` tool backed by `bash.exe` instead of `pwsh`, which
+  provides a meaningful anchoring effect. **The effect on Windows is generally
+  not as strong as on Linux** because the Windows surface differs (for
+  example, the compatibility `bash` tool is unsandboxed). Without Git Bash,
+  the panel shows “Git Bash 未安装” and Windows keeps using `pwsh`. See the
+  [Git Bash install guide](docs/git-bash-install.md).
+
 ## Installation
 
 Requires DeepSeek Harness (`dsh`) `0.1.0-rc.6` or later.
@@ -43,7 +56,7 @@ Manual install: add the dependency and insert the two rows, then restart.
 
 ```json
 // ~/.dsh/profiles/<profile>/package.json → dependencies
-"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.3.0"
+"@deepseek-ai/dsh-extrapro-anchor": "github:OoWJZZoO/dsh-extrapro-anchor#v0.3.2"
 ```
 
 ```sh
