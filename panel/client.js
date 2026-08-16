@@ -23,6 +23,16 @@ window.__ModuleLoader__.load({
 
 		const NS = "extrapro-anchor-panel";
 
+		// ── Windows Git Bash install-guide URLs (bilingual, chosen by the
+		//    normal locale dictionary lookup via t("gitBash.docsUrl")) ────────
+		// Keep this ref on the branch that carries docs/git-bash-install*.md;
+		// switch to "main" once the feature branch is merged.
+		const GIT_BASH_DOCS_REF = "windows-gitbash";
+		const GIT_BASH_DOC_URL = Object.freeze({
+			zh: "https://github.com/OoWJZZoO/dsh-extrapro-anchor/blob/" + GIT_BASH_DOCS_REF + "/docs/git-bash-install.zh.md",
+			en: "https://github.com/OoWJZZoO/dsh-extrapro-anchor/blob/" + GIT_BASH_DOCS_REF + "/docs/git-bash-install.md",
+		});
+
 		// ── stylesheet (DeepSeek Harness token surface) ──────────────────────
 		const CSS = `
 .ashp_wrap{box-sizing:border-box;position:absolute;z-index:30;font-family:inherit}
@@ -60,6 +70,8 @@ window.__ModuleLoader__.load({
 .ashp_healthMeta{color:var(--dsw-alias-label-caption);font-size:11px;line-height:16px}
 .ashp_banner{border-radius:8px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;padding:7px 9px}
 .ashp_bannerError{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}
+.ashp_link{color:var(--dsw-alias-state-business-primary);text-decoration:none}
+.ashp_link:hover{text-decoration:underline}
 .ashp_field{display:flex;flex-direction:column;gap:5px}
 .ashp_fieldHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .ashp_fieldLabel{font-size:12px;font-weight:500;line-height:18px;color:var(--dsw-alias-label-secondary)}
@@ -233,6 +245,7 @@ window.__ModuleLoader__.load({
 				this.view = {
 					status: "cold",
 					settings: cloneDefaults(),
+					host: null,
 					error: null,
 					flushError: null,
 					saving: false,
@@ -293,8 +306,15 @@ window.__ModuleLoader__.load({
 					virtualReasoningTemplate: textOf(value, "virtualReasoningTemplate"),
 					virtualCommandTemplate: textOf(value, "virtualCommandTemplate"),
 				};
+				const hostRaw = result.value?.host;
+				const host = hostRaw && typeof hostRaw === "object"
+					? {
+						platform: typeof hostRaw.platform === "string" ? hostRaw.platform : "",
+						gitBashInstalled: hostRaw.gitBashInstalled === true,
+					}
+					: null;
 				const flags = this.projectDirty();
-				this.publish({ status: "ready", settings, error: null, ...flags });
+				this.publish({ status: "ready", settings, host, error: null, ...flags });
 			}
 			errorText(error) {
 				if (typeof error?.message === "string" && error.message) return error.message;
@@ -415,6 +435,11 @@ window.__ModuleLoader__.load({
 		 * GlobalStandardProps: the runtime's `sessions.list` observable is the
 		 * same source `useSessions` binds, read through useSyncExternalStore.
 		 */
+		/**
+		 * Root-scoped session-list read WITHOUT relying on the renderer's
+		 * GlobalStandardProps: the runtime's `sessions.list` observable is the
+		 * same source `useSessions` binds, read through useSyncExternalStore.
+		 */
 		function useSessionListState(sessions) {
 			const list = sessions?.list;
 			const subscribe = react.useCallback((fn) => (list ? list.subscribe(fn) : () => {}), [list]);
@@ -484,6 +509,11 @@ window.__ModuleLoader__.load({
 
 			const sessionSnapshot = useCurrentSessionSnapshot(controller.sessions);
 			const health = react.useMemo(() => healthOfSnapshot(sessionSnapshot), [sessionSnapshot]);
+			const showMissingGitBash =
+				view.host?.platform === "win32" &&
+				view.host?.gitBashInstalled === false &&
+				view.settings.enabled === true &&
+				(health.status === "watch" || health.status === "drift");
 
 			const [expanded, setExpanded] = react.useState(props.initialExpanded === true);
 			const [position, setPosition] = react.useState(loadPosition);
@@ -534,7 +564,8 @@ window.__ModuleLoader__.load({
 				void controller.flush();
 			}, [controller]);
 
-			const healthLabel = health.status === "idle" ? t("health.idle")
+			const healthLabel = showMissingGitBash ? t("health.gitBashMissing")
+				: health.status === "idle" ? t("health.idle")
 				: health.status === "watch" ? (health.letMe > 1 ? "let me × " + health.letMe : t("health.watch"))
 				: health.status === "drift" ? t("health.drift")
 				: t("health.healthy");
@@ -591,7 +622,9 @@ window.__ModuleLoader__.load({
 					react.createElement("button", { type: "button", className: "ashp_button", onClick: () => void controller.load() }, t("retry")),
 				);
 			} else {
-				const healthMeta = health.status === "watch" || health.status === "drift"
+				const healthMeta = showMissingGitBash
+					? t("health.gitBashMissing")
+					: health.status === "watch" || health.status === "drift"
 					? "let me × " + health.letMe + " · we × " + health.we + " · " + tp(t, "health.blocks", { n: health.blocks })
 					: "we × " + health.we + " · " + tp(t, "health.blocks", { n: health.blocks });
 				body = react.createElement(react.Fragment, null,
@@ -616,6 +649,15 @@ window.__ModuleLoader__.load({
 						),
 						react.createElement("div", { className: "ashp_healthMeta" }, health.status === "idle" ? t("health.idle") : healthLabel + " · " + healthMeta),
 					),
+					showMissingGitBash ? react.createElement("div", { className: "ashp_banner", role: "status" },
+						react.createElement("div", null, t("gitBash.missingHint")),
+						react.createElement("a", {
+							className: "ashp_link",
+							href: t("gitBash.docsUrl"),
+							target: "_blank",
+							rel: "noreferrer",
+						}, t("gitBash.docsLink")),
+					) : null,
 					view.flushError ? react.createElement("div", { className: "ashp_banner ashp_bannerError", role: "alert" }, t("flushFailed") + " " + view.flushError) : null,
 					FIELDS.map((spec) => {
 						const draft = view.settings[spec.field];
@@ -694,7 +736,11 @@ window.__ModuleLoader__.load({
 			"health.watch": "出现 let me",
 			"health.drift": "已偏离锚定",
 			"health.idle": "暂无思考",
+			"health.gitBashMissing": "Git Bash 未安装",
 			"health.blocks": "{n} 个思考块",
+			"gitBash.missingHint": "Windows 上检测不到 Git Bash：请安装 Git Bash 并把 bash 注册进 PATH，完成后重启 dsh web。",
+			"gitBash.docsLink": "打开安装教程",
+			"gitBash.docsUrl": GIT_BASH_DOC_URL.zh,
 			"field.elevationNotice": "引导说明",
 			"field.elevationNotice.hint": "写入引导文件开头，不可为空",
 			"field.virtualUserTemplate": "虚拟提问",
@@ -726,7 +772,11 @@ window.__ModuleLoader__.load({
 			"health.watch": "let me present",
 			"health.drift": "Anchor drifted",
 			"health.idle": "No reasoning yet",
+			"health.gitBashMissing": "Git Bash not installed",
 			"health.blocks": "{n} blocks",
+			"gitBash.missingHint": "Git Bash was not detected on Windows: install it, add bash to PATH, then restart dsh web.",
+			"gitBash.docsLink": "Open install guide",
+			"gitBash.docsUrl": GIT_BASH_DOC_URL.en,
 			"field.elevationNotice": "Elevation notice",
 			"field.elevationNotice.hint": "Opens the injected guide file; must not be empty",
 			"field.virtualUserTemplate": "Virtual request",

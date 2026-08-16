@@ -34,7 +34,7 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   `package.json` carrying the `dsh.client` manifest, and the hand-built
   `__ModuleLoader__` browser bundle `client.js` (floating overlay, switch,
   health, text editor).
-- `test/` — `node --test`; run `npm test` (118 tests incl. the reference
+- `test/` — `node --test`; run `npm test` (119 tests incl. the reference
   dsh-anchored-standard tree under this checkout). `lib/runtime.js`,
   `lib/settings.js`, and `lib/health.js` must stay testable with zero harness
   dependencies.
@@ -185,6 +185,14 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 - **Health reads the model, not the seed.** The panel excludes the virtual
   prelude (`turn: 1, step: 0`) and includes the live partial; any `let me` in
   the recent window must show the amber/red warning state.
+- **Windows Git Bash diagnosis rides the config bridge.** `lib/index.js`
+  passes the boot-time `platform` / `gitBashInstalled` facts into
+  `createExtraproAnchorConfigBridge`; the panel reads them from
+  `extraproAnchorConfig.get()`'s `host` field and, on Windows with injection
+  ON and a watch/drift chain, replaces the generic let-me warning with
+  "Git Bash 未安装" plus the locale-aware link to
+  `docs/git-bash-install*.md`. Keep `lib/config-remote.js` and
+  `panel/client.js` host-fact parsing in sync.
 
 ## Verification workflow
 

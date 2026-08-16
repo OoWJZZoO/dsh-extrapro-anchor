@@ -32,7 +32,11 @@ test('the bridge exposes extraproAnchorConfig.get/set and round-trips the settin
   const dir = mkdtempSync(join(tmpdir(), 'extrapro-anchor-bridge-'))
   try {
     const store = createSettingsStore({ path: join(dir, 'settings.json') })
-    const Bridge = createExtraproAnchorConfigBridge(protocol, store)
+    const Bridge = createExtraproAnchorConfigBridge(protocol, store, {
+      platform: 'win32',
+      gitBashInstalled: true,
+      gitBashPath: 'C:\\Git\\bin\\bash.exe',
+    })
     const bridge = new Bridge({})
 
     assert.equal(getExtraproAnchorConfigService(), bridge)
@@ -41,6 +45,11 @@ test('the bridge exposes extraproAnchorConfig.get/set and round-trips the settin
 
     const initial = await bridge.get()
     assert.equal(initial.value.enabled, false)
+    assert.deepEqual(initial.host, {
+      platform: 'win32',
+      gitBashInstalled: true,
+      gitBashPath: 'C:\\Git\\bin\\bash.exe',
+    })
 
     const next = { ...defaultSettings(), enabled: true, elevationNotice: '自定义' }
     const result = await bridge.set(next)
@@ -50,6 +59,22 @@ test('the bridge exposes extraproAnchorConfig.get/set and round-trips the settin
     assert.equal(store.snapshot().enabled, true)
 
     await assert.rejects(() => bridge.set({ ...next, virtualCommandTemplate: 'missing placeholder' }), /\{path\}/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the bridge defaults host facts for non-Windows/missing Git Bash installs', async () => {
+  const protocol = fakeProtocol()
+  const dir = mkdtempSync(join(tmpdir(), 'extrapro-anchor-bridge-facts-'))
+  try {
+    const store = createSettingsStore({ path: join(dir, 'settings.json') })
+    const Bridge = createExtraproAnchorConfigBridge(protocol, store)
+    const bridge = new Bridge({})
+    const initial = await bridge.get()
+    assert.equal(initial.host.platform, process.platform)
+    assert.equal(initial.host.gitBashInstalled, false)
+    assert.equal(initial.host.gitBashPath, undefined)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
