@@ -16,6 +16,19 @@ catalog, the anchor is seeded deterministically before the first request.
 This is a community project. It is not an official DeepSeek preset and is not
 affiliated with or endorsed by DeepSeek.
 
+## Highlights
+
+- **Plug and play.** The bundled `cordis.patch.yml` composes both plugin rows
+  automatically. There is no preset modification and no code change: install,
+  restart, and use the floating panel to switch injection on or off.
+- **Works on any preset and project.** The anchor is seeded into fresh
+  top-level sessions regardless of the active preset, and the full tool catalog
+  remains available after the first turn.
+- **Windows adaptation.** With Git Bash installed, the plugin detects it and
+  gives anchored sessions a `bash.exe`-backed compatibility `bash` tool instead
+  of `pwsh`, including foreground and background execution. Without Git Bash,
+  the panel shows an install prompt and links to a bilingual install guide.
+
 ## What it does
 
 - On every fresh top-level session, the plugin appends one virtual turn:
@@ -29,15 +42,9 @@ affiliated with or endorsed by DeepSeek.
 
 ## Platform support
 
-- **Linux / macOS**: full anchoring effect — the virtual turn and the real
-  `bash` tool run on the native shell surface.
-- **Windows**: now compatible. With Git Bash installed and discoverable on
-  `PATH` (or via `DSH_EXTRAPRO_ANCHOR_GIT_BASH_PATH`), anchored sessions get a
-  compatibility `bash` tool backed by `bash.exe` instead of `pwsh`, which
-  provides a meaningful anchoring effect. **The effect on Windows is generally
-  not as strong as on Linux** because the Windows surface differs (for
-  example, the compatibility `bash` tool is unsandboxed). Without Git Bash,
-  the panel shows “Git Bash 未安装” and Windows keeps using `pwsh`. See the
+- **Linux / macOS**: full anchoring effect on the native shell surface.
+- **Windows**: compatibility mode through Git Bash. It provides a working
+  anchor, but the effect is generally not as strong as on Linux. See the
   [Git Bash install guide](docs/git-bash-install.md).
 
 ## Installation

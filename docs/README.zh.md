@@ -12,6 +12,16 @@
 
 这是社区项目,并非 DeepSeek 官方 preset,也不代表 DeepSeek 的认可或背书。
 
+## 特点
+
+- **即插即用**。自带的 `cordis.patch.yml` 会自动合成两行插件,不需要修改
+  preset,也不需要改代码:安装、重启,然后用悬浮面板开关注入即可。
+- **适用于任意 preset 和项目**。fresh 顶层会话都会被注入锚点,不依赖具体
+  preset;首轮之后完整工具目录仍然可用。
+- **Windows 适配**。安装 Git Bash 后,插件会自动检测,并让已锚定会话使用
+  基于 `bash.exe` 的兼容 `bash` 工具替代 `pwsh`,支持前台与后台执行。未检测到
+  Git Bash 时,面板会显示安装提示并链接到中英文安装教程。
+
 ## 它做什么
 
 - 每个新的顶层会话都会先被注入一轮虚拟回合:用户消息要求读取
@@ -23,15 +33,9 @@
 
 ## 平台支持
 
-- **Linux / macOS**:完整锚定效果——虚拟轮和真实 `bash` 工具都运行在原生的
-  shell 表面上。
-- **Windows**:现在可以兼容。安装 Git Bash 并使其可被 `PATH` 检测到(或通过
-  `DSH_EXTRAPRO_ANCHOR_GIT_BASH_PATH` 指定)后,已锚定会话会获得基于
-  `bash.exe` 的兼容 `bash` 工具来替代 `pwsh`,从而起到一定锚定效果。
-  **但 Windows 上的效果通常不如 Linux**,因为 Windows 表面存在差异(例如兼容
-  `bash` 工具不经过文件沙箱)。未检测到 Git Bash 时,面板会显示
-  “Git Bash 未安装”,Windows 会话继续使用 `pwsh`。安装方法见
-  [Git Bash 安装教程](git-bash-install.zh.md)。
+- **Linux / macOS**:原生 shell 表面上提供完整锚定效果。
+- **Windows**:通过 Git Bash 提供兼容模式,可以正常锚定,但效果通常不如
+  Linux。安装方法见 [Git Bash 安装教程](git-bash-install.zh.md)。
 
 ## 安装
 
