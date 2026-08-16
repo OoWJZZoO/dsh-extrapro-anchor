@@ -27,11 +27,14 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   external imports.
 - `lib/guards.js` — environment self-check (dsh-read-image pattern): a failed
   check must leave the plugin inert, never take the harness boot down.
+- `lib/windows-gitbash.js` — Windows Git Bash compatibility `bash` tool:
+  `bash.exe` discovery, the model-facing schema, spawn/timeout handling, and
+  per-stream tail/spill output collection. No Cordis imports; unit-tested.
 - `panel/` — companion client row: empty host half (`index.js`), nested
   `package.json` carrying the `dsh.client` manifest, and the hand-built
   `__ModuleLoader__` browser bundle `client.js` (floating overlay, switch,
   health, text editor).
-- `test/` — `node --test`; run `npm test` (87 tests incl. the reference
+- `test/` — `node --test`; run `npm test` (119 tests incl. the reference
   dsh-anchored-standard tree under this checkout). `lib/runtime.js`,
   `lib/settings.js`, and `lib/health.js` must stay testable with zero harness
   dependencies.
@@ -123,6 +126,27 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
   carries `source.kind: 'user'` so the trajectory renders it as a real user
   message.
 
+## Working on the Windows Git Bash adapter
+
+- **The schema must stay honest.** The model-facing `bash` definition
+  advertises only what the backend implements: `command`, `description`,
+  `timeoutMs`, `workdir`, managed `$DSH_*` facts (only when `ctx.shellEnv`
+  exists), tail truncation with a full-output spill file, and
+  `run_in_background` (unless `enableRunInBackground: false`). Background calls
+  go through `ctx.jobs` via the lazy accessor passed in from `lib/index.js`,
+  exactly like `dsh-tool-bash`. Do not re-add `sandbox_permissions` or
+  `justification` until this backend actually runs inside the harness sandbox.
+- **`shellEnv` stays optional.** `lib/index.js` reads it through guarded
+  `ctx.get('shellEnv')` — never add `shellEnv` to `inject`; a missing service
+  must only drop the `$DSH_*` sentence, never block boot.
+- **One process handle serves both modes.** Foreground and background must
+  both use `startGitBashProcess()`; foreground adds timeout/abort on top,
+  background adapts the handle to the `ctx.jobs` producer contract
+  (`{ cancel, done, readOutput }`). Keep `done` resolving (never rejecting)
+  with `completed | killed | failed`.
+- Keep `lib/windows-gitbash.js` Cordis-free and update
+  `test/windows-gitbash.test.mjs` for every schema or executor change.
+
 ## Working on the floating panel
 
 - **One row id, five matching spellings.** The panel is a companion row named
@@ -161,6 +185,17 @@ tool call. See `README.md` / `docs/README.zh.md` for the mechanism.
 - **Health reads the model, not the seed.** The panel excludes the virtual
   prelude (`turn: 1, step: 0`) and includes the live partial; any `let me` in
   the recent window must show the amber/red warning state.
+- **Windows Git Bash diagnosis rides the config bridge.** `lib/index.js`
+  passes the boot-time `platform` / `gitBashInstalled` facts into
+  `createExtraproAnchorConfigBridge`; the panel reads them from
+  `extraproAnchorConfig.get()`'s `host` field. On Windows with injection ON
+  and Git Bash missing, the COLLAPSED pill shows "Git Bash 未安装" regardless
+  of chain health (green included), while the expanded health box keeps the
+  real let me/we counters and adds the locale-aware link to
+  `docs/git-bash-install*.md`. The hint is dismissible with "忽略" (persisted
+  in localStorage), and the flag resets once the host reports Git Bash
+  installed. Keep `lib/config-remote.js` and `panel/client.js` host-fact
+  parsing in sync.
 
 ## Verification workflow
 

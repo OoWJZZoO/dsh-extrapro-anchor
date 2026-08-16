@@ -100,6 +100,7 @@ The composition row accepts optional overrides:
 | Key | Default | Description |
 | --- | --- | --- |
 | `enabled` | `false` | Fallback injection switch when no panel settings file exists. The panel's persisted value overrides it at seed time. |
+| `enableRunInBackground` | `true` | Windows Git Bash compatibility tool: expose `run_in_background` and register background calls with the harness job runtime. `false` removes the parameter and rejects forced background calls. |
 | `elevationSource` | `auto` | `auto`: capture the preset's non-persona prompt sections; `config`: use `elevationPrompt` only; `none`: elevation notice only. |
 | `elevationPrompt` | `''` | Explicit prompt text for `elevationSource: config`. |
 | `elevationNotice` | built-in sentence | Framing sentence at the top of the guide file. |
@@ -138,6 +139,15 @@ npm test
   from the panel or the row config.
 - Long sessions with compaction may summarize or prune the elevation in the
   first tool result.
+- On Windows, when Git Bash is detected and injection is ON, anchored sessions
+  see the compatibility `bash` tool (backed by `bash.exe`) instead of `pwsh`.
+  It supports foreground and background (`run_in_background`) execution with
+  the harness job controls (`job_output` / `job_kill`), `workdir`,
+  `timeoutMs`, managed `$DSH_*` facts (when the harness shell-env service is
+  loaded), and tail truncation with a full-output spill file. It is still
+  unsandboxed: there is no `sandbox_permissions` escalation. Set
+  `enableRunInBackground: false` on the composition row to hide background
+  execution.
 - Validate the trajectory fingerprint on your own model/setup before relying
   on it.
 

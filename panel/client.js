@@ -23,6 +23,14 @@ window.__ModuleLoader__.load({
 
 		const NS = "extrapro-anchor-panel";
 
+		// ── Windows Git Bash install-guide URLs (bilingual, chosen by the
+		//    normal locale dictionary lookup via t("gitBash.docsUrl")) ────────
+		const GIT_BASH_DOCS_REF = "main";
+		const GIT_BASH_DOC_URL = Object.freeze({
+			zh: "https://github.com/OoWJZZoO/dsh-extrapro-anchor/blob/" + GIT_BASH_DOCS_REF + "/docs/git-bash-install.zh.md",
+			en: "https://github.com/OoWJZZoO/dsh-extrapro-anchor/blob/" + GIT_BASH_DOCS_REF + "/docs/git-bash-install.md",
+		});
+
 		// ── stylesheet (DeepSeek Harness token surface) ──────────────────────
 		const CSS = `
 .ashp_wrap{box-sizing:border-box;position:absolute;z-index:30;font-family:inherit}
@@ -60,6 +68,11 @@ window.__ModuleLoader__.load({
 .ashp_healthMeta{color:var(--dsw-alias-label-caption);font-size:11px;line-height:16px}
 .ashp_banner{border-radius:8px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;padding:7px 9px}
 .ashp_bannerError{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}
+.ashp_link{color:var(--dsw-alias-state-business-primary);text-decoration:none}
+.ashp_link:hover{text-decoration:underline}
+.ashp_gitBashActions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
+.ashp_ignoreBtn{background:none;border:none;padding:0;color:var(--dsw-alias-label-caption);font:inherit;font-size:12px;line-height:18px;cursor:pointer;flex:none}
+.ashp_ignoreBtn:hover{color:var(--dsw-alias-label-secondary)}
 .ashp_field{display:flex;flex-direction:column;gap:5px}
 .ashp_fieldHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .ashp_fieldLabel{font-size:12px;font-weight:500;line-height:18px;color:var(--dsw-alias-label-secondary)}
@@ -233,6 +246,7 @@ window.__ModuleLoader__.load({
 				this.view = {
 					status: "cold",
 					settings: cloneDefaults(),
+					host: null,
 					error: null,
 					flushError: null,
 					saving: false,
@@ -293,8 +307,15 @@ window.__ModuleLoader__.load({
 					virtualReasoningTemplate: textOf(value, "virtualReasoningTemplate"),
 					virtualCommandTemplate: textOf(value, "virtualCommandTemplate"),
 				};
+				const hostRaw = result.value?.host;
+				const host = hostRaw && typeof hostRaw === "object"
+					? {
+						platform: typeof hostRaw.platform === "string" ? hostRaw.platform : "",
+						gitBashInstalled: hostRaw.gitBashInstalled === true,
+					}
+					: null;
 				const flags = this.projectDirty();
-				this.publish({ status: "ready", settings, error: null, ...flags });
+				this.publish({ status: "ready", settings, host, error: null, ...flags });
 			}
 			errorText(error) {
 				if (typeof error?.message === "string" && error.message) return error.message;
@@ -415,6 +436,11 @@ window.__ModuleLoader__.load({
 		 * GlobalStandardProps: the runtime's `sessions.list` observable is the
 		 * same source `useSessions` binds, read through useSyncExternalStore.
 		 */
+		/**
+		 * Root-scoped session-list read WITHOUT relying on the renderer's
+		 * GlobalStandardProps: the runtime's `sessions.list` observable is the
+		 * same source `useSessions` binds, read through useSyncExternalStore.
+		 */
 		function useSessionListState(sessions) {
 			const list = sessions?.list;
 			const subscribe = react.useCallback((fn) => (list ? list.subscribe(fn) : () => {}), [list]);
@@ -423,6 +449,23 @@ window.__ModuleLoader__.load({
 		}
 		const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 		const POSITION_KEY = "dsh-extrapro-anchor-panel-position";
+		const GIT_BASH_IGNORE_KEY = "dsh-extrapro-anchor-gitbash-ignored";
+		function loadGitBashIgnored() {
+			try {
+				return window.localStorage.getItem(GIT_BASH_IGNORE_KEY) === "1";
+			} catch {
+				// Storage unavailable — the hint simply stays visible.
+			}
+			return false;
+		}
+		function saveGitBashIgnored(ignored) {
+			try {
+				if (ignored) window.localStorage.setItem(GIT_BASH_IGNORE_KEY, "1");
+				else window.localStorage.removeItem(GIT_BASH_IGNORE_KEY);
+			} catch {
+				// Storage unavailable — ignoring only lasts for this panel instance.
+			}
+		}
 		function loadPosition() {
 			try {
 				const raw = window.localStorage.getItem(POSITION_KEY);
@@ -484,6 +527,28 @@ window.__ModuleLoader__.load({
 
 			const sessionSnapshot = useCurrentSessionSnapshot(controller.sessions);
 			const health = react.useMemo(() => healthOfSnapshot(sessionSnapshot), [sessionSnapshot]);
+			const [gitBashIgnored, setGitBashIgnored] = react.useState(loadGitBashIgnored);
+			const missingGitBash =
+				view.host?.platform === "win32" &&
+				view.host?.gitBashInstalled === false &&
+				view.settings.enabled === true;
+			// The collapsed pill reports the missing-install diagnosis for ANY
+			// chain health (green included); the expanded health box keeps the
+			// real let me/we counters untouched.
+			const showMissingGitBash = missingGitBash && !gitBashIgnored;
+			// Once Git Bash is actually available (or the host is no longer
+			// Windows), an old "ignore" flag is stale and should not hide a
+			// future real warning.
+			react.useEffect(() => {
+				if (gitBashIgnored && view.host !== null && (view.host.platform !== "win32" || view.host.gitBashInstalled === true)) {
+					saveGitBashIgnored(false);
+					setGitBashIgnored(false);
+				}
+			}, [view.host, gitBashIgnored]);
+			const ignoreGitBash = react.useCallback(() => {
+				saveGitBashIgnored(true);
+				setGitBashIgnored(true);
+			}, []);
 
 			const [expanded, setExpanded] = react.useState(props.initialExpanded === true);
 			const [position, setPosition] = react.useState(loadPosition);
@@ -534,10 +599,11 @@ window.__ModuleLoader__.load({
 				void controller.flush();
 			}, [controller]);
 
-			const healthLabel = health.status === "idle" ? t("health.idle")
+			const normalHealthLabel = health.status === "idle" ? t("health.idle")
 				: health.status === "watch" ? (health.letMe > 1 ? "let me × " + health.letMe : t("health.watch"))
 				: health.status === "drift" ? t("health.drift")
 				: t("health.healthy");
+			const healthLabel = showMissingGitBash ? t("health.gitBashMissing") : normalHealthLabel;
 
 			const statusText = view.settings.enabled ? t("switch.on") : t("switch.off");
 			const disabled = view.status !== "ready" || view.saving;
@@ -594,6 +660,9 @@ window.__ModuleLoader__.load({
 				const healthMeta = health.status === "watch" || health.status === "drift"
 					? "let me × " + health.letMe + " · we × " + health.we + " · " + tp(t, "health.blocks", { n: health.blocks })
 					: "we × " + health.we + " · " + tp(t, "health.blocks", { n: health.blocks });
+				const healthMetaText = health.status === "idle"
+					? t("health.idle")
+					: normalHealthLabel + " · " + healthMeta;
 				body = react.createElement(react.Fragment, null,
 					react.createElement("div", { className: "ashp_row" },
 						react.createElement("span", { className: "ashp_rowLabel" }, t("switch.label")),
@@ -614,8 +683,24 @@ window.__ModuleLoader__.load({
 							react.createElement("span", null, t("health.label")),
 							react.createElement("span", { className: "ashp_healthScore" }, health.score === null ? "—" : health.score),
 						),
-						react.createElement("div", { className: "ashp_healthMeta" }, health.status === "idle" ? t("health.idle") : healthLabel + " · " + healthMeta),
+						react.createElement("div", { className: "ashp_healthMeta" }, healthMetaText),
 					),
+					showMissingGitBash ? react.createElement("div", { className: "ashp_banner", role: "status" },
+						react.createElement("div", null, t("gitBash.missingHint")),
+						react.createElement("div", { className: "ashp_gitBashActions" },
+							react.createElement("a", {
+								className: "ashp_link",
+								href: t("gitBash.docsUrl"),
+								target: "_blank",
+								rel: "noreferrer",
+							}, t("gitBash.docsLink")),
+							react.createElement("button", {
+								type: "button",
+								className: "ashp_ignoreBtn",
+								onClick: ignoreGitBash,
+							}, t("gitBash.ignore")),
+						),
+					) : null,
 					view.flushError ? react.createElement("div", { className: "ashp_banner ashp_bannerError", role: "alert" }, t("flushFailed") + " " + view.flushError) : null,
 					FIELDS.map((spec) => {
 						const draft = view.settings[spec.field];
@@ -694,7 +779,12 @@ window.__ModuleLoader__.load({
 			"health.watch": "出现 let me",
 			"health.drift": "已偏离锚定",
 			"health.idle": "暂无思考",
+			"health.gitBashMissing": "Git Bash 未安装",
 			"health.blocks": "{n} 个思考块",
+			"gitBash.missingHint": "检测不到 Git Bash，这将大幅削弱锚定效果，强烈建议安装",
+			"gitBash.docsLink": "打开安装教程",
+			"gitBash.docsUrl": GIT_BASH_DOC_URL.zh,
+			"gitBash.ignore": "忽略",
 			"field.elevationNotice": "引导说明",
 			"field.elevationNotice.hint": "写入引导文件开头，不可为空",
 			"field.virtualUserTemplate": "虚拟提问",
@@ -726,7 +816,12 @@ window.__ModuleLoader__.load({
 			"health.watch": "let me present",
 			"health.drift": "Anchor drifted",
 			"health.idle": "No reasoning yet",
+			"health.gitBashMissing": "Git Bash not installed",
 			"health.blocks": "{n} blocks",
+			"gitBash.missingHint": "Git Bash was not detected. This will significantly weaken the anchoring effect; installing it is strongly recommended.",
+			"gitBash.docsLink": "Open install guide",
+			"gitBash.docsUrl": GIT_BASH_DOC_URL.en,
+			"gitBash.ignore": "Ignore",
 			"field.elevationNotice": "Elevation notice",
 			"field.elevationNotice.hint": "Opens the injected guide file; must not be empty",
 			"field.virtualUserTemplate": "Virtual request",
